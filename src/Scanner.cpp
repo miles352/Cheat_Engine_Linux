@@ -42,11 +42,22 @@ void Scanner::scan_memory(pid_t pid, const std::vector<std::vector<MemUtils::Add
                     return;
                 }
 
-                scan_value.visit([pid, &map_to_scan, &new_addrs]<typename T>(const T& val)
+                scan_value.visit([pid, &map_to_scan, &new_addrs, cmp = scan_comparison]<typename T>(const T& val)
                 {
                     if constexpr (!std::is_same_v<T, std::string>)
                     {
-                        new_addrs.append_range(MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, [&val](T addr_val) { return addr_val == val; }));
+                        switch (cmp)
+                        {
+                        case EQUAL_TO:
+                            new_addrs.append_range(MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return t1 == t2; }));
+                            break;
+                        case LESS_THAN:
+                            new_addrs.append_range(MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return t1 < t2; }));
+                            break;
+                        case GREATER_THAN:
+                            new_addrs.append_range(MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return t1 > t2; }));
+                            break;
+                        }
                     }
                     else
                     {
@@ -83,11 +94,22 @@ void Scanner::rescan_memory(pid_t pid)
                 return;
             }
 
-            scan_value.visit([pid, addr, &still_valid]<typename T>(const T& val)
+            scan_value.visit([pid, addr, &still_valid, cmp = scan_comparison]<typename T>(const T& val)
             {
                 if constexpr (!std::is_same_v<T, std::string>)
                 {
-                    if (MemUtils::read_addr<T>(pid, addr) == val) still_valid.emplace_back(addr);
+                    switch (cmp)
+                    {
+                    case EQUAL_TO:
+                        if (MemUtils::read_addr<T>(pid, addr) == val) still_valid.emplace_back(addr);
+                        break;
+                    case LESS_THAN:
+                        if (MemUtils::read_addr<T>(pid, addr) < val) still_valid.emplace_back(addr);
+                        break;
+                    case GREATER_THAN:
+                        if (MemUtils::read_addr<T>(pid, addr) > val) still_valid.emplace_back(addr);
+                        break;
+                    }
                 }
                 else
                 {
@@ -170,8 +192,6 @@ void Scanner::draw(pid_t pid)
 
     draw_scantype_input(scan_value, "Scan Value");
 
-    // The options after this shouldn't change in the middle of a sequence of scans
-    if (!scanned_addrs.empty()) ImGui::BeginDisabled();
 
     if (ImGui::BeginCombo("Scan Type", SCAN_TYPE_LABELS[scan_value.index()]))
     {
@@ -185,6 +205,17 @@ void Scanner::draw(pid_t pid)
 
         ImGui::EndCombo();
     }
+
+    if (ImGui::BeginCombo("Scan Comparison", SCAN_COMPARISON_LABELS[scan_comparison]))
+    {
+        if (ImGui::Selectable(SCAN_COMPARISON_LABELS[0])) scan_comparison = EQUAL_TO;
+        if (ImGui::Selectable(SCAN_COMPARISON_LABELS[1])) scan_comparison = LESS_THAN;
+        if (ImGui::Selectable(SCAN_COMPARISON_LABELS[2])) scan_comparison = GREATER_THAN;
+        ImGui::EndCombo();
+    }
+
+    // The options after this shouldn't change in the middle of a sequence of scans
+    if (!scanned_addrs.empty()) ImGui::BeginDisabled();
 
     const char* mem_region_preview = selected_mapping.empty() ? "All" : selected_mapping.c_str();
     if (ImGui::BeginCombo("Memory Region", mem_region_preview))

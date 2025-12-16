@@ -55,9 +55,9 @@ namespace MemUtils
         // }
     }
 
-    template <typename T>
-    requires std::is_trivially_copyable_v<T>
-    std::vector<uintptr_t> search_addr_range(pid_t pid, uintptr_t start, uintptr_t end, const std::function<bool(T)>& predicate)
+    template <typename T, typename Pred>
+    requires std::is_trivially_copyable_v<T> && std::predicate<Pred, T, T>
+    std::vector<uintptr_t> search_addr_range(pid_t pid, uintptr_t start, uintptr_t end, T value, Pred&& pred)
     {
         size_t page_size = getpagesize();
         assert((end - start) % page_size == 0);
@@ -79,7 +79,7 @@ namespace MemUtils
 
             for (int j = 0; j < amt_read / sizeof(T); j++)
             {
-                if (predicate(buff[j])) addrs.push_back(start + page_size * i + j * sizeof(T));
+                if (pred(buff[j], value)) addrs.push_back(start + page_size * i + j * sizeof(T));
             }
         }
 

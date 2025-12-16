@@ -26,6 +26,13 @@ public:
         bool selected;
     };
 
+    enum ScanComparisons
+    {
+        EQUAL_TO,
+        LESS_THAN,
+        GREATER_THAN
+    };
+
     /** Mutex used on the scanning thread. */
     std::mutex scan_mutex;
     std::thread scan_thread;
@@ -36,6 +43,8 @@ public:
     std::atomic_bool cancelled = false;
     /** The value to look for when scanning. Cast to other smaller types if not scanning for 8 byte value. */
     ScanType scan_value{int32_t{0}};
+    /** The index into the SCAN_COMPARISON_FUNCS array to use when scanning for a value */
+    ScanComparisons scan_comparison {EQUAL_TO};
     std::atomic<float> scan_percent{};
     /** Mappings of the virtual address spaces the program has control of. */
     std::vector<std::vector<MemUtils::AddressMapping>> mappings;
@@ -52,7 +61,11 @@ public:
 
 
 
-    static constexpr std::array<const char*, 7> SCAN_TYPE_LABELS {"1 Byte", "2 Bytes", "4 Bytes", "8 Bytes", "Float", "Double", "String"};
+    static constexpr std::array SCAN_TYPE_LABELS {"1 Byte", "2 Bytes", "4 Bytes", "8 Bytes", "Float", "Double", "String"};
+    static constexpr std::array SCAN_COMPARISON_LABELS {"Equal to", "Less than", "Greater than"};
+
+
+
 
     /** Scan the memory for the first time */
     void scan_memory(pid_t pid, const std::vector<std::vector<MemUtils::AddressMapping>>& mappings);
