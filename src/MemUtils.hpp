@@ -43,6 +43,20 @@ namespace MemUtils
 
     template <typename T>
     requires std::is_trivially_copyable_v<T>
+    void write_addr(pid_t pid, uintptr_t addr, T value)
+    {
+        iovec from{reinterpret_cast<void*>(&value), sizeof(T)};
+        iovec to{reinterpret_cast<void*>(addr), sizeof(T)};
+
+        ssize_t status = process_vm_writev(pid, &from, 1, &to, 1, 0);
+        // if (status < 0)
+        // {
+        // perror("Error2: ");
+        // }
+    }
+
+    template <typename T>
+    requires std::is_trivially_copyable_v<T>
     std::vector<uintptr_t> search_addr_range(pid_t pid, uintptr_t start, uintptr_t end, const std::function<bool(T)>& predicate)
     {
         size_t page_size = getpagesize();

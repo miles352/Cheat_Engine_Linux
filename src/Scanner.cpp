@@ -9,6 +9,8 @@
 
 #include "Application.hpp"
 #include "imgui.h"
+#include "imgui_internal.h"
+#include "misc/cpp/imgui_stdlib.h"
 
 
 void Scanner::scan_memory(pid_t pid, const std::vector<std::vector<MemUtils::AddressMapping>>& mappings)
@@ -165,42 +167,7 @@ void Scanner::draw(pid_t pid)
         }
     }
 
-    scan_value.visit([this]<typename T>(T& val)
-    {
-        if constexpr (!std::is_same_v<T, std::string>)
-        {
-            ImGuiDataType type;
-            if constexpr (std::is_same_v<T, int8_t>)
-            {
-                type = ImGuiDataType_S8;
-            }
-            else if constexpr (std::is_same_v<T, int16_t>)
-            {
-                type = ImGuiDataType_S16;
-            }
-            else if constexpr (std::is_same_v<T, int32_t>)
-            {
-                type = ImGuiDataType_S32;
-            }
-            else if constexpr (std::is_same_v<T, int64_t>)
-            {
-                type = ImGuiDataType_S64;
-            }
-            else if constexpr (std::is_same_v<T, float>)
-            {
-                type = ImGuiDataType_Float;
-            }
-            else if constexpr (std::is_same_v<T, double>)
-            {
-                type = ImGuiDataType_Double;
-            }
-            ImGui::InputScalar("Scan Value", type, &val);
-        }
-        else
-        {
-            // TODO: Implement strings
-        }
-    });
+    draw_scantype_input(scan_value, "Scan Value");
 
     // The options after this shouldn't change in the middle of a sequence of scans
     if (!scanned_addrs.empty()) ImGui::BeginDisabled();
@@ -258,111 +225,286 @@ void Scanner::draw(pid_t pid)
     scan_mutex.unlock();
 }
 
-void Scanner::draw_scan_results(pid_t pid) const
+void Scanner::draw_scan_results(pid_t pid)
 {
     ImGui::Begin("Scan Results");
     ImGui::Text("Found: %d", scanned_addrs.size());
-    ImGui::BeginTable("address_results", 2, ImGuiTableFlags_ScrollY);
-
-    ImGui::TableSetupScrollFreeze(0, 1); // Make top row always visible
-    ImGui::TableSetupColumn("Address");
-    ImGui::TableSetupColumn("Value");
-    // ImGui::TableSetupColumn("Old Value");
-    ImGui::TableHeadersRow();
-
-
-    ImGuiListClipper clipper;
-
-    clipper.Begin(scanned_addrs.size());
-
-    while (clipper.Step())
+    if (ImGui::BeginTable("address_results", 2, ImGuiTableFlags_ScrollY))
     {
-        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++)
+        ImGui::TableSetupScrollFreeze(0, 1); // Make top row always visible
+        ImGui::TableSetupColumn("Address");
+        ImGui::TableSetupColumn("Value");
+        // ImGui::TableSetupColumn("Old Value");
+        ImGui::TableHeadersRow();
+
+
+        ImGuiListClipper clipper;
+
+        clipper.Begin(scanned_addrs.size());
+
+        while (clipper.Step())
         {
-            ImGui::TableNextRow();
-            // Address column
-            ImGui::TableNextColumn();
-            ImGui::Text("0x%lx", scanned_addrs[i]);
-
-            // Value column
-            ImGui::TableNextColumn();
-
-            scan_value.visit([pid, addr = scanned_addrs[i]]<typename T>(const T& val)
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++)
             {
-                if constexpr (!std::is_same_v<T, std::string>)
-                {
-                    ImGui::TextUnformatted(std::format("{}", MemUtils::read_addr<T>(pid, addr)).c_str());
-                }
+                bool selected = selected_result_addrs.contains(scanned_addrs[i]);
+
+                // set hover color to invisible so we dont get hover effects
+                ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+                if (!selected)
+                    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0,0,0,0));
                 else
+                    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_Header));
+
+
+                ImGui::TableNextRow();
+                // Address column
+                ImGui::TableNextColumn();
+
+                ImGuiSelectableFlags flags = ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap | ImGuiSelectableFlags_AllowDoubleClick;
+                if (ImGui::Selectable(std::format("{:x}", scanned_addrs[i]).c_str(), selected, flags)) // if clicked or double clicked
                 {
-                    // TODO: Implement strings
+                    selected_result_addrs.clear();
+                    selected_result_addrs.emplace(scanned_addrs[i]);
+                    // TODO: Ctrl click / Shift click to select multiple
+
+                    if (ImGui::IsMouseDoubleClicked(0))
+                    {
+                        addr_table_entries.emplace_back(false, "Enter description", scanned_addrs[i], scan_value);
+                    }
                 }
-            });
 
-            // Old Value column
-            // ImGui::TableNextColumn();
+                // Value column
+                ImGui::TableNextColumn();
 
-            // scanned_old_vals[i].visit([]<typename T>(const T& val)
-            // {
-            //     if constexpr (!std::is_same_v<T, std::string>)
-            //     {
-            //         ImGui::TextUnformatted(std::format("{}", val).c_str());
-            //     }
-            //     else
-            //     {
-            //         // TODO: Implement strings
-            //     }
-            // });
+                scan_value.visit([pid, addr = scanned_addrs[i]]<typename T>(const T& val)
+                {
+                    if constexpr (!std::is_same_v<T, std::string>)
+                    {
+                        ImGui::TextUnformatted(std::format("{}", MemUtils::read_addr<T>(pid, addr)).c_str());
+                    }
+                    else
+                    {
+                        // TODO: Implement strings
+                    }
+                });
+
+                // Old Value column
+                // ImGui::TableNextColumn();
+
+                // scanned_old_vals[i].visit([]<typename T>(const T& val)
+                // {
+                //     if constexpr (!std::is_same_v<T, std::string>)
+                //     {
+                //         ImGui::TextUnformatted(std::format("{}", val).c_str());
+                //     }
+                //     else
+                //     {
+                //         // TODO: Implement strings
+                //     }
+                // });
+                ImGui::PopStyleColor(2);
+            }
         }
-    }
 
-    ImGui::EndTable();
+        ImGui::EndTable();
+    }
 
     ImGui::End();
 
 }
 
-
-
 void Scanner::draw_addr_table(pid_t pid)
 {
     ImGui::Begin("Address Table");
 
-    ImGui::BeginTable("addr_table", 5);
-
-    ImGui::TableSetupColumn("Frozen");
-    ImGui::TableSetupColumn("Description");
-    ImGui::TableSetupColumn("Address");
-    ImGui::TableSetupColumn("Type");
-    ImGui::TableSetupColumn("Value");
-    ImGui::TableHeadersRow();
-
-    // TODO: Doesnt make sense to store ScanType here because we just want the type, the value is calculated every frame
-
-    for (auto& entry : entries)
+    if (ImGui::BeginTable("addr_table", 5, ImGuiTableFlags_ScrollY))
     {
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        ImGui::Checkbox("", &entry.frozen);
-        ImGui::TableNextColumn();
-        ImGui::TextUnformatted(entry.description.c_str());
-        ImGui::TableNextColumn();
-        ImGui::Text("0x%lx", entry.addr);
-        ImGui::TableNextColumn();
-        ImGui::Text("Float");
-        ImGui::TableNextColumn();
-        ImGui::Text("%f", std::get<float>(entry.value));
+        ImGui::TableSetupScrollFreeze(0, 1); // Make top row always visible
+        ImGui::TableSetupColumn("Frozen");
+        ImGui::TableSetupColumn("Description");
+        ImGui::TableSetupColumn("Address");
+        ImGui::TableSetupColumn("Type");
+        ImGui::TableSetupColumn("Value");
+        ImGui::TableHeadersRow();
 
+        for (int i = 0; i < addr_table_entries.size(); i++)
+        {
+            AddrTableEntry& entry = addr_table_entries[i];
+
+            bool selected = selected_addr_table_entries.contains(i);
+
+            // set hover color to invisible so we dont get hover effects
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+            if (!selected)
+                ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0,0,0,0));
+            else
+                ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_Header));
+
+            ImGui::PushID(&entry);
+            ImGui::TableNextRow();
+
+            ImGui::TableNextColumn();
+
+            if (ImGui::Selectable("##selectable_row", selected, ImGuiSelectableFlags_AllowOverlap | ImGuiSelectableFlags_SpanAllColumns, ImVec2(0.0f, ImGui::GetFrameHeight())))
+            {
+                selected_addr_table_entries.clear();
+                selected_addr_table_entries.emplace(i);
+                // TODO: Ctrl click / Shift click to select multiple
+            }
+            ImGui::SameLine(); // Needed or the selectable eats a column
+
+            ScanType new_val = entry.value.visit([pid, &entry]<typename T>(const T&)
+            {
+                if constexpr (!std::is_same_v<T, std::string>)
+                {
+                    return ScanType{MemUtils::read_addr<T>(pid, entry.addr)};
+                }
+                else
+                {
+                    // TODO: Implement strings
+                    return ScanType{5};
+                }
+            });
+
+
+            ImGui::Checkbox("##checkbox_frozen", &entry.frozen);
+            if (entry.frozen)
+            {
+                if (new_val != entry.value)
+                {
+                    entry.value.visit([pid, &entry]<typename T>(const T& val)
+                    {
+                        if constexpr (!std::is_same_v<T, std::string>)
+                        {
+                            MemUtils::write_addr(pid, entry.addr, val);
+                        }
+                        else
+                        {
+                            // TODO: implement strings
+                        }
+                    });
+                    new_val = entry.value;
+                }
+            }
+            ImGui::TableNextColumn();
+
+            ImGui::InputText("##text_description", &entry.description);
+            // ImGui::TextUnformatted(entry.description.c_str());
+            ImGui::TableNextColumn();
+
+            ImGui::Text("0x%lx", entry.addr);
+            ImGui::TableNextColumn();
+
+            ImGui::PopStyleColor(2);
+
+            size_t new_type = new_val.index();
+            if (ImGui::BeginCombo("##combo_typeselect", SCAN_TYPE_LABELS[new_val.index()]))
+            {
+
+                for (int j = 0; j < SCAN_TYPE_LABELS.size(); j++)
+                {
+                    if (ImGui::Selectable(SCAN_TYPE_LABELS[j], new_type == j))
+                    {
+                        new_type = j;
+                    }
+                }
+
+                ImGui::EndCombo();
+            }
+
+            if (new_type != new_val.index())
+            {
+                new_val.visit([&new_val, new_type]<typename T>(const T& value)
+                {
+                    if constexpr (!std::is_same_v<T, std::string>)
+                    {
+                        if (new_type == 0) new_val = static_cast<int8_t>(value);
+                        if (new_type == 1) new_val = static_cast<int16_t>(value);
+                        if (new_type == 2) new_val = static_cast<int32_t>(value);
+                        if (new_type == 3) new_val = static_cast<int64_t>(value);
+                        if (new_type == 4) new_val = static_cast<float>(value);
+                        if (new_type == 5) new_val = static_cast<double>(value);
+                        if (new_type == 6) new_val = "";
+                    }
+                    else
+                    {
+                        if (new_type != 6) new_val = "";
+                    }
+                });
+            }
+
+
+
+            ImGui::TableNextColumn();
+
+
+            draw_scantype_input(new_val, "##value");
+
+            if (ImGui::IsItemDeactivatedAfterEdit())
+            {
+                new_val.visit([pid, &entry]<typename T>(const T& val)
+                {
+                    if constexpr (!std::is_same_v<T, std::string>)
+                    {
+                        MemUtils::write_addr(pid, entry.addr, val);
+                    }
+                    else
+                    {
+                        // TODO: implement strings
+                    }
+                });
+            }
+
+
+            entry.value = new_val;
+
+
+            ImGui::PopID();
+        }
+
+
+        ImGui::EndTable();
     }
 
-    // frozen, description, addr, type, value
-
-    // bool, std::string, uintptr_t, ScanType
-
-
-
-
-    ImGui::EndTable();
-
     ImGui::End();
+}
+
+void Scanner::draw_scantype_input(ScanType& value, const char* label)
+{
+    value.visit([label]<typename T>(T& val)
+    {
+        if constexpr (!std::is_same_v<T, std::string>)
+        {
+            ImGuiDataType type;
+            if constexpr (std::is_same_v<T, int8_t>)
+            {
+                type = ImGuiDataType_S8;
+            }
+            else if constexpr (std::is_same_v<T, int16_t>)
+            {
+                type = ImGuiDataType_S16;
+            }
+            else if constexpr (std::is_same_v<T, int32_t>)
+            {
+                type = ImGuiDataType_S32;
+            }
+            else if constexpr (std::is_same_v<T, int64_t>)
+            {
+                type = ImGuiDataType_S64;
+            }
+            else if constexpr (std::is_same_v<T, float>)
+            {
+                type = ImGuiDataType_Float;
+            }
+            else if constexpr (std::is_same_v<T, double>)
+            {
+                type = ImGuiDataType_Double;
+            }
+            ImGui::InputScalar(label, type, &val);
+        }
+        else
+        {
+            // TODO: Implement strings
+        }
+    });
 }
