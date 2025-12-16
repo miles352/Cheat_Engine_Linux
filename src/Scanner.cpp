@@ -1,6 +1,7 @@
 #include "Scanner.hpp"
 
 
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <numeric>
@@ -317,25 +318,25 @@ void Scanner::draw_addr_table(pid_t pid)
 {
     ImGui::Begin("Address Table");
 
-    if (ImGui::BeginTable("addr_table", 5, ImGuiTableFlags_ScrollY))
+    if (ImGui::BeginTable("addr_table", 5, ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit))
     {
+        ImGui::PushStyleVarX(ImGuiStyleVar_CellPadding, 0.0f);
         ImGui::TableSetupScrollFreeze(0, 1); // Make top row always visible
-        ImGui::TableSetupColumn("Frozen");
-        ImGui::TableSetupColumn("Description");
-        ImGui::TableSetupColumn("Address");
-        ImGui::TableSetupColumn("Type");
-        ImGui::TableSetupColumn("Value");
+        ImGui::TableSetupColumn("Frozen", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("Description", ImGuiTableColumnFlags_WidthStretch, 3.0f);
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 2.0f);
         ImGui::TableHeadersRow();
+        ImGui::PopStyleVar();
 
         for (int i = 0; i < addr_table_entries.size(); i++)
         {
             AddrTableEntry& entry = addr_table_entries[i];
 
-            bool selected = selected_addr_table_entries.contains(i);
-
             // set hover color to invisible so we dont get hover effects
             ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
-            if (!selected)
+            if (!entry.selected)
                 ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0,0,0,0));
             else
                 ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_Header));
@@ -345,19 +346,25 @@ void Scanner::draw_addr_table(pid_t pid)
 
             ImGui::TableNextColumn();
 
-            if (ImGui::Selectable("##selectable_row", selected, ImGuiSelectableFlags_AllowOverlap | ImGuiSelectableFlags_SpanAllColumns, ImVec2(0.0f, ImGui::GetFrameHeight())))
+            if (ImGui::Selectable("##selectable_row", entry.selected, ImGuiSelectableFlags_AllowOverlap | ImGuiSelectableFlags_SpanAllColumns, ImVec2(0.0f, ImGui::GetFrameHeight())))
             {
-                selected_addr_table_entries.clear();
-                selected_addr_table_entries.emplace(i);
+                std::ranges::for_each(addr_table_entries, [](auto& entry) { entry.selected = false; });
+                entry.selected = true;
                 // TODO: Ctrl click / Shift click to select multiple
             }
             ImGui::SameLine(); // Needed or the selectable eats a column
 
-            ScanType new_val = entry.value.visit([pid, &entry]<typename T>(const T&)
+            ScanType new_val = entry.value.visit([pid, &entry]<typename T>(const T& val)
             {
                 if constexpr (!std::is_same_v<T, std::string>)
                 {
-                    return ScanType{MemUtils::read_addr<T>(pid, entry.addr)};
+                    auto new_val = ScanType{MemUtils::read_addr<T>(pid, entry.addr)};
+                    if (entry.frozen && new_val != entry.value)
+                    {
+                        MemUtils::write_addr(pid, entry.addr, val);
+                        return ScanType{val};
+                    }
+                    return new_val;
                 }
                 else
                 {
@@ -368,28 +375,12 @@ void Scanner::draw_addr_table(pid_t pid)
 
 
             ImGui::Checkbox("##checkbox_frozen", &entry.frozen);
-            if (entry.frozen)
-            {
-                if (new_val != entry.value)
-                {
-                    entry.value.visit([pid, &entry]<typename T>(const T& val)
-                    {
-                        if constexpr (!std::is_same_v<T, std::string>)
-                        {
-                            MemUtils::write_addr(pid, entry.addr, val);
-                        }
-                        else
-                        {
-                            // TODO: implement strings
-                        }
-                    });
-                    new_val = entry.value;
-                }
-            }
+
             ImGui::TableNextColumn();
 
+            ImGui::SetNextItemWidth(-FLT_MIN); // make the text box take up the full column width
             ImGui::InputText("##text_description", &entry.description);
-            // ImGui::TextUnformatted(entry.description.c_str());
+
             ImGui::TableNextColumn();
 
             ImGui::Text("0x%lx", entry.addr);
@@ -437,7 +428,7 @@ void Scanner::draw_addr_table(pid_t pid)
 
             ImGui::TableNextColumn();
 
-
+            ImGui::SetNextItemWidth(-FLT_MIN);
             draw_scantype_input(new_val, "##value");
 
             if (ImGui::IsItemDeactivatedAfterEdit())

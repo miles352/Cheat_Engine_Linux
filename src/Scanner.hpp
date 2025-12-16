@@ -23,6 +23,7 @@ public:
         std::string description;
         uintptr_t addr;
         ScanType value;
+        bool selected;
     };
 
     /** Mutex used on the scanning thread. */
@@ -48,8 +49,6 @@ public:
 
     // Address table
     std::vector<AddrTableEntry> addr_table_entries;
-    /** A set of the selected indexes */
-    std::set<size_t> selected_addr_table_entries;
 
 
 
