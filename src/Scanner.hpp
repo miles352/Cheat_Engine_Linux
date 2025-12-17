@@ -15,7 +15,9 @@ class Scanner
 {
 
 public:
+
     using ScanType = std::variant<int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
+    using ScanResultsValues = std::variant<std::vector<int8_t>, std::vector<int16_t>, std::vector<int32_t>, std::vector<int64_t>, std::vector<float>, std::vector<double>>;
 
     struct AddrTableEntry
     {
@@ -28,22 +30,31 @@ public:
 
     enum ScanComparisons
     {
-        EQUAL_TO,
-        LESS_THAN,
-        GREATER_THAN
+        EQUAL_TO, // scan value == user typed value
+        LESS_THAN, // scan value < user typed value
+        GREATER_THAN, // scan value > user typed value
+        INCREASED,
+        DECREASED,
+        UNCHANGED,
+        CHANGED
     };
+
+
 
     /** Mutex used on the scanning thread. */
     std::mutex scan_mutex;
     std::thread scan_thread;
     /** The addresses found when scanning. */
     std::vector<uintptr_t> scanned_addrs;
+    /** Stores the old values to be displayed and compared against. */
+    ScanResultsValues scanned_old_values;
+    // TODO: Keep track of old values as ScanTypes
     /** A flag used for if the scanner is currently scanning the memory. */
     std::atomic_bool scanning = false;
     std::atomic_bool cancelled = false;
     /** The value to look for when scanning. Cast to other smaller types if not scanning for 8 byte value. */
     ScanType scan_value{int32_t{0}};
-    /** The index into the SCAN_COMPARISON_FUNCS array to use when scanning for a value */
+    /** The type of comparison to perform when scanning for values. */
     ScanComparisons scan_comparison {EQUAL_TO};
     std::atomic<float> scan_percent{};
     /** Mappings of the virtual address spaces the program has control of. */
@@ -62,7 +73,7 @@ public:
 
 
     static constexpr std::array SCAN_TYPE_LABELS {"1 Byte", "2 Bytes", "4 Bytes", "8 Bytes", "Float", "Double", "String"};
-    static constexpr std::array SCAN_COMPARISON_LABELS {"Equal to", "Less than", "Greater than"};
+    static constexpr std::array SCAN_COMPARISON_LABELS {"Equal to", "Less than", "Greater than", "Increased", "Decreased", "Unchanged", "Changed"};
 
 
 

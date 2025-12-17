@@ -55,14 +55,17 @@ namespace MemUtils
         // }
     }
 
+    /** Returns a pair containing the addresses found, and the value read at that address */
     template <typename T, typename Pred>
     requires std::is_trivially_copyable_v<T> && std::predicate<Pred, T, T>
-    std::vector<uintptr_t> search_addr_range(pid_t pid, uintptr_t start, uintptr_t end, T value, Pred&& pred)
+    std::pair<std::vector<uintptr_t>, std::vector<T>> search_addr_range(pid_t pid, uintptr_t start, uintptr_t end, T value, Pred&& pred)
     {
         size_t page_size = getpagesize();
+        assert(end > start);
         assert((end - start) % page_size == 0);
 
         std::vector<uintptr_t> addrs;
+        std::vector<T> values;
         std::vector<T> buff(page_size / sizeof(T));
         for (int i = 0; i < (end - start) / page_size; i++)
         {
@@ -79,10 +82,14 @@ namespace MemUtils
 
             for (int j = 0; j < amt_read / sizeof(T); j++)
             {
-                if (pred(buff[j], value)) addrs.push_back(start + page_size * i + j * sizeof(T));
+                if (pred(buff[j], value))
+                {
+                    addrs.push_back(start + page_size * i + j * sizeof(T));
+                    values.push_back(buff[j]);
+                }
             }
         }
 
-        return addrs;
+        return std::pair{std::move(addrs), std::move(values)};
     }
 }

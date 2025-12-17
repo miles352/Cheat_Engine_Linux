@@ -21,58 +21,75 @@ void Scanner::scan_memory(pid_t pid, const std::vector<std::vector<MemUtils::Add
 
     scan_thread = std::thread{[this, pid, &mappings]
     {
-        scanning = true;
-        // Add up all the address distances in the maps
-        uint64_t total_address_len = std::accumulate(mappings.begin(), mappings.end(), 0,
-        [](uint64_t sum, const std::vector<AddressMapping>& same_name_mappings) { return sum + std::accumulate(same_name_mappings.begin(), same_name_mappings.end(), 0,
-        [](uint64_t sum, const AddressMapping& mapping) { return sum + mapping.end - mapping.start; }); });
-
-        uint64_t addresses_scanned{};
-        std::vector<uintptr_t> new_addrs;
-        auto tp = std::chrono::system_clock::now();
-        // accessing mappings should be fine without lock because it is reading only and the main thread only can write to it when scanning is false
-        for (auto& mapping : mappings)
+        scan_value.visit([pid, this, &mappings]<typename T>(const T& val)
         {
-            if (!selected_mapping.empty() && mapping[0].pathname != selected_mapping) continue;
-            for (const AddressMapping& map_to_scan : mapping)
+            scanning = true;
+            // Add up all the address distances in the maps
+            uint64_t total_address_len = std::accumulate(mappings.begin(), mappings.end(), 0,
+            [](uint64_t sum, const std::vector<AddressMapping>& same_name_mappings) { return sum + std::accumulate(same_name_mappings.begin(), same_name_mappings.end(), 0,
+            [](uint64_t sum, const AddressMapping& mapping) { return sum + mapping.end - mapping.start; }); });
+            uint64_t addresses_scanned{};
+            std::vector<uintptr_t> new_addrs;
+            std::vector<T> old_values;
+            auto tp = std::chrono::system_clock::now();
+            // accessing mappings should be fine without lock because it is reading only and the main thread only can write to it when scanning is false
+            for (auto& mapping : mappings)
             {
-                if (cancelled)
+                if (!selected_mapping.empty() && mapping[0].pathname != selected_mapping) continue;
+                for (const AddressMapping& map_to_scan : mapping)
                 {
-                    scanning = false;
-                    return;
-                }
+                    if (cancelled)
+                    {
+                        scanning = false;
+                        return;
+                    }
 
-                scan_value.visit([pid, &map_to_scan, &new_addrs, cmp = scan_comparison]<typename T>(const T& val)
-                {
+
                     if constexpr (!std::is_same_v<T, std::string>)
                     {
-                        switch (cmp)
+                        switch (scan_comparison)
                         {
                         case EQUAL_TO:
-                            new_addrs.append_range(MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return t1 == t2; }));
-                            break;
+                            {
+                                auto [addrs, values] = MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return t1 == t2; });
+                                new_addrs.append_range(addrs);
+                                old_values.append_range(values);
+                                break;
+                            }
                         case LESS_THAN:
-                            new_addrs.append_range(MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return t1 < t2; }));
-                            break;
+                            {
+                                auto [addrs, values] = MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return t1 < t2; });
+                                new_addrs.append_range(addrs);
+                                old_values.append_range(values);
+                                break;
+                            }
                         case GREATER_THAN:
-                            new_addrs.append_range(MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return t1 > t2; }));
-                            break;
+                            {
+                                auto [addrs, values] = MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return t1 > t2; });
+                                new_addrs.append_range(addrs);
+                                old_values.append_range(values);
+                                break;
+                            }
                         }
                     }
                     else
                     {
                         // TODO: Implement strings
                     }
-                });
 
-                addresses_scanned += map_to_scan.end - map_to_scan.start;
-                scan_percent = static_cast<float>(addresses_scanned) / total_address_len;
+                    addresses_scanned += map_to_scan.end - map_to_scan.start;
+                    scan_percent = static_cast<float>(addresses_scanned) / total_address_len;
+                }
             }
-        }
-        std::println("Took {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - tp).count());
-        std::lock_guard lock{scan_mutex};
-        scanned_addrs = std::move(new_addrs);
-        scanning = false;
+            std::println("Took {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - tp).count());
+            std::lock_guard lock{scan_mutex};
+            scanned_addrs = std::move(new_addrs);
+            if constexpr (!std::is_same_v<T, std::string>)
+            {
+                scanned_old_values = std::move(old_values);
+            }
+            scanning = false;
+        });
     }};
 }
 
@@ -81,50 +98,70 @@ void Scanner::rescan_memory(pid_t pid)
     cancelled = false;
     scan_thread = std::thread{[this, pid]
     {
-        scanning = true;
-        std::chrono::time_point<std::chrono::system_clock> tp = std::chrono::system_clock::now();
-        std::vector<uintptr_t> still_valid; //TODO: Would be cool if it didnt allocate more memory temporarily, but probably fine
-
-        std::atomic_uint64_t total_new{};
-        for (uintptr_t addr : scanned_addrs)
+        scan_value.visit([pid, this]<typename T>(const T& val)
         {
-            if (cancelled)
-            {
-                scanning = false;
-                return;
-            }
+            scanning = true;
+            std::chrono::time_point<std::chrono::system_clock> tp = std::chrono::system_clock::now();
+            std::vector<uintptr_t> still_valid; //TODO: Would be cool if it didnt allocate more memory temporarily, but probably fine
+            std::vector<T> new_old_values;
 
-            scan_value.visit([pid, addr, &still_valid, cmp = scan_comparison]<typename T>(const T& val)
+            uint64_t total_new{};
+            for (int i = 0; i < scanned_addrs.size(); i++)
             {
+                uintptr_t addr = scanned_addrs[i];
+                if (cancelled)
+                {
+                    scanning = false;
+                    return;
+                }
+
+
                 if constexpr (!std::is_same_v<T, std::string>)
                 {
-                    switch (cmp)
+                    T new_val = MemUtils::read_addr<T>(pid, addr);
+                    switch (scan_comparison)
                     {
                     case EQUAL_TO:
-                        if (MemUtils::read_addr<T>(pid, addr) == val) still_valid.emplace_back(addr);
+                        if (new_val == val) still_valid.emplace_back(addr);
                         break;
                     case LESS_THAN:
-                        if (MemUtils::read_addr<T>(pid, addr) < val) still_valid.emplace_back(addr);
+                        if (new_val < val) still_valid.emplace_back(addr);
                         break;
                     case GREATER_THAN:
-                        if (MemUtils::read_addr<T>(pid, addr) > val) still_valid.emplace_back(addr);
+                        if (new_val > val) still_valid.emplace_back(addr);
+                        break;
+                    case INCREASED:
+                        if (new_val > std::get<std::vector<T>>(scanned_old_values)[i]) still_valid.emplace_back(addr);
+                        break;
+                    case DECREASED:
+                        if (new_val < std::get<std::vector<T>>(scanned_old_values)[i]) still_valid.emplace_back(addr);
+                        break;
+                    case UNCHANGED:
+                        if (new_val == std::get<std::vector<T>>(scanned_old_values)[i]) still_valid.emplace_back(addr);
+                        break;
+                    case CHANGED:
+                        if (new_val != std::get<std::vector<T>>(scanned_old_values)[i]) still_valid.emplace_back(addr);
                         break;
                     }
+                    new_old_values.emplace_back(new_val);
                 }
                 else
                 {
                     // TODO: Implement strings
                 }
-            });
 
-
-            scan_percent = static_cast<float>(total_new++) / scanned_addrs.size();
-        }
-        std::lock_guard lock{scan_mutex};
-        scanned_addrs = std::move(still_valid);
-        std::println("Took {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - tp).count());
-        std::cout << std::endl;
-        scanning = false;
+                scan_percent = static_cast<float>(total_new++) / scanned_addrs.size();
+            }
+            std::lock_guard lock{scan_mutex};
+            scanned_addrs = std::move(still_valid);
+            if constexpr (!std::is_same_v<T, std::string>)
+            {
+                scanned_old_values = std::move(new_old_values);
+            }
+            std::println("Took {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - tp).count());
+            std::cout << std::endl;
+            scanning = false;
+        });
     }};
 }
 
@@ -193,6 +230,18 @@ void Scanner::draw(pid_t pid)
     draw_scantype_input(scan_value, "Scan Value");
 
 
+    if (ImGui::BeginCombo("Scan Comparison", SCAN_COMPARISON_LABELS[scan_comparison]))
+    {
+        for (int i = 0; i < SCAN_COMPARISON_LABELS.size(); i++)
+        {
+            if (ImGui::Selectable(SCAN_COMPARISON_LABELS[i])) scan_comparison = static_cast<ScanComparisons>(i);
+        }
+        ImGui::EndCombo();
+    }
+
+    // The options after this shouldn't change in the middle of a sequence of scans
+    if (!scanned_addrs.empty()) ImGui::BeginDisabled();
+
     if (ImGui::BeginCombo("Scan Type", SCAN_TYPE_LABELS[scan_value.index()]))
     {
         if (ImGui::Selectable(SCAN_TYPE_LABELS[0])) scan_value = static_cast<int8_t>(0);
@@ -205,17 +254,6 @@ void Scanner::draw(pid_t pid)
 
         ImGui::EndCombo();
     }
-
-    if (ImGui::BeginCombo("Scan Comparison", SCAN_COMPARISON_LABELS[scan_comparison]))
-    {
-        if (ImGui::Selectable(SCAN_COMPARISON_LABELS[0])) scan_comparison = EQUAL_TO;
-        if (ImGui::Selectable(SCAN_COMPARISON_LABELS[1])) scan_comparison = LESS_THAN;
-        if (ImGui::Selectable(SCAN_COMPARISON_LABELS[2])) scan_comparison = GREATER_THAN;
-        ImGui::EndCombo();
-    }
-
-    // The options after this shouldn't change in the middle of a sequence of scans
-    if (!scanned_addrs.empty()) ImGui::BeginDisabled();
 
     const char* mem_region_preview = selected_mapping.empty() ? "All" : selected_mapping.c_str();
     if (ImGui::BeginCombo("Memory Region", mem_region_preview))
@@ -260,13 +298,13 @@ void Scanner::draw(pid_t pid)
 void Scanner::draw_scan_results(pid_t pid)
 {
     ImGui::Begin("Scan Results");
-    ImGui::Text("Found: %d", scanned_addrs.size());
-    if (ImGui::BeginTable("address_results", 2, ImGuiTableFlags_ScrollY))
+    ImGui::Text("Found: %lu", scanned_addrs.size());
+    if (ImGui::BeginTable("address_results", 3, ImGuiTableFlags_ScrollY))
     {
         ImGui::TableSetupScrollFreeze(0, 1); // Make top row always visible
         ImGui::TableSetupColumn("Address");
         ImGui::TableSetupColumn("Value");
-        // ImGui::TableSetupColumn("Old Value");
+        ImGui::TableSetupColumn("Old Value");
         ImGui::TableHeadersRow();
 
 
@@ -321,19 +359,19 @@ void Scanner::draw_scan_results(pid_t pid)
                 });
 
                 // Old Value column
-                // ImGui::TableNextColumn();
+                ImGui::TableNextColumn();
 
-                // scanned_old_vals[i].visit([]<typename T>(const T& val)
-                // {
-                //     if constexpr (!std::is_same_v<T, std::string>)
-                //     {
-                //         ImGui::TextUnformatted(std::format("{}", val).c_str());
-                //     }
-                //     else
-                //     {
-                //         // TODO: Implement strings
-                //     }
-                // });
+                scanned_old_values.visit([i]<typename T>(const T& val)
+                {
+                    if constexpr (!std::is_same_v<T, std::string>)
+                    {
+                        ImGui::TextUnformatted(std::format("{}", val[i]).c_str());
+                    }
+                    else
+                    {
+                        // TODO: Implement strings
+                    }
+                });
                 ImGui::PopStyleColor(2);
             }
         }

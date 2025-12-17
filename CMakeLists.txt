@@ -11,7 +11,6 @@ add_executable(${CMAKE_PROJECT_NAME}
         src/Application.hpp
         src/Scanner.cpp
         src/Scanner.hpp
-        src/MemUtils.cpp
         src/MemUtils.hpp
 )
 
