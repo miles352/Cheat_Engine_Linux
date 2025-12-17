@@ -3,7 +3,7 @@ project(Cheat_Engine_Linux)
 
 set(CMAKE_CXX_STANDARD 26)
 
-add_subdirectory(dependencies/imgui)
+add_subdirectory(dependencies/)
 
 add_executable(${CMAKE_PROJECT_NAME}
         src/main.cpp
