@@ -7,6 +7,7 @@
 #include <numeric>
 #include <ostream>
 #include <print>
+#include <utility>
 
 #include "Application.hpp"
 #include "imgui.h"
@@ -70,6 +71,17 @@ void Scanner::scan_memory(pid_t pid, const std::vector<std::vector<MemUtils::Add
                                 old_values.append_range(values);
                                 break;
                             }
+                        case UNKNOWN:
+                            {
+                                auto [addrs, values] = MemUtils::search_addr_range<T>(pid, map_to_scan.start, map_to_scan.end, val, [](T t1, T t2) { return true; });
+                                new_addrs.append_range(addrs);
+                                old_values.append_range(values);
+                                break;
+                            }
+                        case INCREASED:
+                        case DECREASED:
+                        case UNCHANGED:
+                        case CHANGED: std::unreachable(); // These cases are disabled in the UI when scanning for the first time
                         }
                     }
                     else
@@ -106,6 +118,10 @@ void Scanner::rescan_memory(pid_t pid)
             std::vector<T> new_old_values;
 
             uint64_t total_new{};
+
+            const size_t pagesize = getpagesize();
+            std::vector<T> page_buffer(pagesize / sizeof(T));
+            uintptr_t current_buffer_start = 0;
             for (int i = 0; i < scanned_addrs.size(); i++)
             {
                 uintptr_t addr = scanned_addrs[i];
@@ -115,10 +131,23 @@ void Scanner::rescan_memory(pid_t pid)
                     return;
                 }
 
+                if (addr < current_buffer_start || addr > current_buffer_start + pagesize)
+                {
+                    current_buffer_start = (addr / pagesize) * pagesize;
+                    iovec from{reinterpret_cast<void*>(current_buffer_start), pagesize};
+                    iovec to{page_buffer.data(), pagesize};
+
+                    ssize_t status = process_vm_readv(pid, &to, 1, &from, 1, 0);
+                    if (status < 0)
+                    {
+                        // perror("Error: ");
+                        continue;
+                    }
+                }
 
                 if constexpr (!std::is_same_v<T, std::string>)
                 {
-                    T new_val = MemUtils::read_addr<T>(pid, addr);
+                    T new_val = page_buffer[(addr % pagesize) / sizeof(T)];
                     switch (scan_comparison)
                     {
                     case EQUAL_TO:
@@ -129,6 +158,9 @@ void Scanner::rescan_memory(pid_t pid)
                         break;
                     case GREATER_THAN:
                         if (new_val > val) still_valid.emplace_back(addr);
+                        break;
+                    case UNKNOWN:
+                        still_valid.emplace_back(addr);
                         break;
                     case INCREASED:
                         if (new_val > std::get<std::vector<T>>(scanned_old_values)[i]) still_valid.emplace_back(addr);
@@ -149,6 +181,7 @@ void Scanner::rescan_memory(pid_t pid)
                 {
                     // TODO: Implement strings
                 }
+
 
                 scan_percent = static_cast<float>(total_new++) / scanned_addrs.size();
             }
@@ -223,6 +256,8 @@ void Scanner::draw(pid_t pid)
             if (ImGui::Button("Clear"))
             {
                 scanned_addrs.clear();
+                scanned_old_values.visit([](auto& vec) { vec.clear(); });
+                if (scan_comparison >= ScanComparisons::UNKNOWN) scan_comparison = ScanComparisons::EQUAL_TO;
             }
         }
     }
@@ -234,6 +269,7 @@ void Scanner::draw(pid_t pid)
     {
         for (int i = 0; i < SCAN_COMPARISON_LABELS.size(); i++)
         {
+            if (scanned_addrs.empty() && i > ScanComparisons::UNKNOWN) break;
             if (ImGui::Selectable(SCAN_COMPARISON_LABELS[i])) scan_comparison = static_cast<ScanComparisons>(i);
         }
         ImGui::EndCombo();

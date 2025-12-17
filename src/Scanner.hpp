@@ -30,13 +30,14 @@ public:
 
     enum ScanComparisons
     {
-        EQUAL_TO, // scan value == user typed value
-        LESS_THAN, // scan value < user typed value
+        EQUAL_TO,     // scan value == user typed value
+        LESS_THAN,    // scan value < user typed value
         GREATER_THAN, // scan value > user typed value
-        INCREASED,
-        DECREASED,
-        UNCHANGED,
-        CHANGED
+        UNKNOWN,      // always true
+        INCREASED,    // new value > old value
+        DECREASED,    // new value < old value
+        UNCHANGED,    // new value == old value
+        CHANGED,      // new value != old value
     };
 
 
@@ -48,7 +49,6 @@ public:
     std::vector<uintptr_t> scanned_addrs;
     /** Stores the old values to be displayed and compared against. */
     ScanResultsValues scanned_old_values;
-    // TODO: Keep track of old values as ScanTypes
     /** A flag used for if the scanner is currently scanning the memory. */
     std::atomic_bool scanning = false;
     std::atomic_bool cancelled = false;
@@ -73,7 +73,7 @@ public:
 
 
     static constexpr std::array SCAN_TYPE_LABELS {"1 Byte", "2 Bytes", "4 Bytes", "8 Bytes", "Float", "Double", "String"};
-    static constexpr std::array SCAN_COMPARISON_LABELS {"Equal to", "Less than", "Greater than", "Increased", "Decreased", "Unchanged", "Changed"};
+    static constexpr std::array SCAN_COMPARISON_LABELS {"Equal to", "Less than", "Greater than", "Unknown (Add all)", "Increased", "Decreased", "Unchanged", "Changed"};
 
 
 

@@ -21,7 +21,7 @@ class Application
     SDL_GLContext gl_context;
     SDL_Window* window;
 
-    pid_t pid = 48318; // TODO: Move pid and other process stuff into class
+    pid_t pid = 24694; // TODO: Move pid and other process stuff into class
 
 
     Scanner scanner;
