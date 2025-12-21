@@ -148,6 +148,7 @@ void Scanner::rescan_memory(pid_t pid)
                 if constexpr (!std::is_same_v<T, std::string>)
                 {
                     T new_val = page_buffer[(addr % pagesize) / sizeof(T)];
+                    size_t valid_len = still_valid.size();
                     switch (scan_comparison)
                     {
                     case EQUAL_TO:
@@ -175,7 +176,8 @@ void Scanner::rescan_memory(pid_t pid)
                         if (new_val != std::get<std::vector<T>>(scanned_old_values)[i]) still_valid.emplace_back(addr);
                         break;
                     }
-                    new_old_values.emplace_back(new_val);
+
+                    if (valid_len != still_valid.size()) new_old_values.emplace_back(new_val);
                 }
                 else
                 {
