@@ -127,7 +127,18 @@ void Application::draw_frame()
     // -
 
 
-    scanner.draw(pid);
+    process_manager.draw();
+
+    // if the selected process changed
+    if (process_manager.updated)
+    {
+        scanner.set_process(process_manager.current);
+        process_manager.updated = false;
+    }
+
+    scanner.draw();
+
+
 
 
 
@@ -182,12 +193,6 @@ std::vector<std::vector<MemUtils::AddressMapping>> Application::get_mappings(pid
         // trim leading whitespace
         auto it = std::ranges::find_if_not(mapping.pathname, [](char c) { return std::isspace(c); });
         mapping.pathname.erase(mapping.pathname.begin(), it);
-
-        // Make duplicate pathnames unnamed entries so they dont get displayed in the gui
-        // if (std::ranges::find_if(mappings, [&mapping](const AddressMapping& other_mapping) { return other_mapping.pathname == mapping.pathname; }) != mappings.end())
-        // {
-        //     mapping.pathname.clear();
-        // }
 
 
         if ((mapping.permissions & 0x1) == 0) continue; // dont include mappings that are unreadable

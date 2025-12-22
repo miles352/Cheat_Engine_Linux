@@ -2,3 +2,7 @@
 	path = dependencies/imgui
 	url = https://github.com/ocornut/imgui.git
 	branch = docking
+[submodule "dependencies/capstone"]
+	path = dependencies/capstone
+	url = https://github.com/capstone-engine/capstone.git
+	branch = v5

@@ -9,20 +9,53 @@
 #include <print>
 #include <utility>
 
+#include <sys/ptrace.h>
+#include <sys/wait.h>
+#include <sys/user.h>
+#include <sys/procfs.h>
+#include <elf.h>
+#include <filesystem>
+
+
 #include "Application.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "capstone/capstone.h"
 #include "misc/cpp/imgui_stdlib.h"
 
 
-void Scanner::scan_memory(pid_t pid, const std::vector<std::vector<MemUtils::AddressMapping>>& mappings)
+void Scanner::set_process(std::optional<Process> new_process)
+{
+    // Clear old stuff
+    cancelled = true;
+    if (scan_thread.joinable()) scan_thread.join();
+    scanned_addrs.clear();
+    scanned_old_values.visit([](auto& vec) { vec.clear(); });
+    scanning = false;
+    scan_value = int32_t{0};
+    scan_comparison = ScanComparisons::EQUAL_TO;
+    mappings.clear();
+    show_library_mappings = false;
+    mapping_select_menu_open = false;
+    selected_mapping.clear();
+    selected_result_addrs.clear();
+    addr_table_entries.clear();
+
+    if (!new_process.has_value()) process = std::nullopt;
+    else
+    {
+        process = std::move(new_process);
+    }
+}
+
+void Scanner::scan_memory(const std::vector<std::vector<MemUtils::AddressMapping>>& mappings)
 {
     cancelled = false;
     using MemUtils::AddressMapping;
 
-    scan_thread = std::thread{[this, pid, &mappings]
+    scan_thread = std::thread{[this, &mappings]
     {
-        scan_value.visit([pid, this, &mappings]<typename T>(const T& val)
+        scan_value.visit([this, &mappings]<typename T>(const T& val)
         {
             scanning = true;
             // Add up all the address distances in the maps
@@ -48,6 +81,7 @@ void Scanner::scan_memory(pid_t pid, const std::vector<std::vector<MemUtils::Add
 
                     if constexpr (!std::is_same_v<T, std::string>)
                     {
+                        pid_t pid = process->pid;
                         switch (scan_comparison)
                         {
                         case EQUAL_TO:
@@ -105,12 +139,12 @@ void Scanner::scan_memory(pid_t pid, const std::vector<std::vector<MemUtils::Add
     }};
 }
 
-void Scanner::rescan_memory(pid_t pid)
+void Scanner::rescan_memory()
 {
     cancelled = false;
-    scan_thread = std::thread{[this, pid]
+    scan_thread = std::thread{[this]
     {
-        scan_value.visit([pid, this]<typename T>(const T& val)
+        scan_value.visit([this]<typename T>(const T& val)
         {
             scanning = true;
             std::chrono::time_point<std::chrono::system_clock> tp = std::chrono::system_clock::now();
@@ -137,7 +171,7 @@ void Scanner::rescan_memory(pid_t pid)
                     iovec from{reinterpret_cast<void*>(current_buffer_start), pagesize};
                     iovec to{page_buffer.data(), pagesize};
 
-                    ssize_t status = process_vm_readv(pid, &to, 1, &from, 1, 0);
+                    ssize_t status = process_vm_readv(process->pid, &to, 1, &from, 1, 0);
                     if (status < 0)
                     {
                         // perror("Error: ");
@@ -200,12 +234,15 @@ void Scanner::rescan_memory(pid_t pid)
     }};
 }
 
-void Scanner::draw(pid_t pid)
+void Scanner::draw()
 {
+
     bool currently_scanning = scanning;
-    scan_mutex.lock();
+    std::unique_lock lock{scan_mutex};
 
     ImGui::Begin("Scanner");
+
+    if (!process.has_value()) ImGui::BeginDisabled();
 
     if (ImGui::BeginPopup("invalid_id"))
     {
@@ -235,7 +272,7 @@ void Scanner::draw(pid_t pid)
 
         if (scanned_addrs.empty() && ImGui::Button("Scan"))
         {
-            mappings = Application::get_mappings(pid, show_library_mappings);
+            mappings = Application::get_mappings(process->pid, show_library_mappings);
             auto it = std::ranges::find_if(mappings, [this](auto& same_name_mappings){ return same_name_mappings[0].pathname == selected_mapping; });
             if (it == mappings.end())
             {
@@ -244,7 +281,7 @@ void Scanner::draw(pid_t pid)
             }
             else
             {
-                scan_memory(pid, mappings);
+                scan_memory(mappings);
             }
 
         }
@@ -252,7 +289,7 @@ void Scanner::draw(pid_t pid)
         {
             if (ImGui::Button("Rescan"))
             {
-                rescan_memory(pid);
+                rescan_memory();
             }
             ImGui::SameLine();
             if (ImGui::Button("Clear"))
@@ -299,7 +336,7 @@ void Scanner::draw(pid_t pid)
         if (!mapping_select_menu_open)
         {
             // Only get the mappings once when the dropdown is opened
-            mappings = Application::get_mappings(pid, show_library_mappings);
+            mappings = Application::get_mappings(process->pid, show_library_mappings);
             mapping_select_menu_open = true;
         }
         if (ImGui::Selectable("All")) selected_mapping.clear();
@@ -321,19 +358,186 @@ void Scanner::draw(pid_t pid)
     if (!scanned_addrs.empty()) ImGui::EndDisabled();
     if (currently_scanning) ImGui::EndDisabled();
 
+
+    ImGui::Spacing();
+    if (ImGui::Button("Debug"))
+    {
+        // pid_t tid = 10534;
+        // long status;
+        // while (true)
+        // {
+        //     status = ptrace(PTRACE_SEIZE, tid, 0, 0);
+        //     if (status < 0) perror("err");
+        //     else break;
+        // }
+        // int status2;
+
+        // set debug watchpoint at ammo address with length of 4 bytes with read or write level.
+
+        for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task/", process->pid)})
+        {
+            pid_t tid = std::stoi(dir.path().filename());
+            long status;
+
+            status = ptrace(PTRACE_SEIZE, tid, 0, 0);
+            if (status < 0) perror("err: ");
+
+            status = ptrace(PTRACE_INTERRUPT, tid, 0, 0);
+            if (status < 0) perror("err: ");
+
+            int changed_state;
+            waitpid(tid, &changed_state, 0);
+            if (!WIFSTOPPED(changed_state)) throw std::runtime_error("State change was not caused by ptrace");
+
+            status = ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[0]), 0x290b4ef4); // set address to breakpoint
+            if (status < 0) perror("err: ");
+
+            long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]));
+
+            dr7 |= 0x1; // set L0, local addr enable
+            dr7 |= (0x1 << 16); // set r/w0 to break on data writes only
+            dr7 |= (0x4 << 18); // set len0 to 4 bytes
+
+
+            status = ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
+
+            status = ptrace(PTRACE_CONT, tid, 0, 0);
+
+
+            // Todo: use waitpid to wait for SIGTRAP
+            // then read shit when it hits, print assembly etc
+        }
+
+        int changed_state;
+
+        int changed_pid = waitpid(-1, &changed_state, 0);
+        if (WIFSTOPPED(changed_state))
+        {
+            int stopcode = WSTOPSIG(changed_state);
+            if (stopcode == SIGTRAP)
+            {
+                printf("Breakpoint triggered\n");
+
+                user_regs_struct regs{};
+
+
+                long status = ptrace(PTRACE_GETREGS, changed_pid, 0, &regs);
+                if (status < 0) perror("err");
+
+                const int asm_bytes {100};
+                std::vector<uint8_t> bytes(asm_bytes);
+                for (int i = 0; i < asm_bytes; i++)
+                {
+                    bytes[i] = MemUtils::read_addr<uint8_t>(process->pid, regs.rip + i - 10);
+                }
+
+
+                csh handle;
+                cs_insn *insn;
+
+                if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK)
+                    return;
+                size_t count = cs_disasm(handle, bytes.data(), bytes.size(), regs.rip - 10, 0, &insn);
+                if (count > 0) {
+                    size_t j;
+                    for (j = 0; j < count; j++) {
+                        if (insn[j].address == regs.rip) printf("--->  ");
+                        printf("0x%" PRIx64, insn[j].address);
+
+                        printf(": %s %s\n", insn[j].mnemonic,
+                                insn[j].op_str);
+                    }
+
+                    cs_free(insn, count);
+                } else
+                    printf("ERROR: Failed to disassemble given code!\n");
+
+                cs_close(&handle);
+
+
+                // clear breakpoints
+                for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task/", process->pid)})
+                {
+                    pid_t tid = std::stoi(dir.path().filename());
+
+                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[0]), 0x0);
+                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]));
+                    dr7 &= ~(0x1); // clear L0
+                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
+
+                    ptrace(PTRACE_DETACH, tid, 0, 0);
+                }
+                // resume execution
+            }
+        }
+
+
+    //     status = ptrace(PTRACE_INTERRUPT, tid);
+    //     if (status < 0) perror("err");
+    //
+    //     waitpid(tid, &status2, 0);
+    //
+    //     long data = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[6]));
+    //     if (data < 0) perror("err");
+    //
+    //     // Note: Should clear DR6 and set DR6:16 after handling interrupt (processor will not clear it)
+    //
+    //     //
+    //     user_regs_struct regs{};
+    //
+    //
+    //     status = ptrace(PTRACE_GETREGS, tid, 0, &regs);
+    //     if (status < 0) perror("err");
+    //
+    //     const int asm_bytes {100};
+    //     std::vector<uint8_t> bytes(asm_bytes*2);
+    //     for (int i = 0; i < asm_bytes; i++)
+    //     {
+    //         bytes[i] = MemUtils::read_addr<uint8_t>(pid, regs.rip + i);
+    //     }
+    //
+    //
+    //     csh handle;
+    //     cs_insn *insn;
+    //
+    //     if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK)
+    //         return;
+    //     size_t count = cs_disasm(handle, bytes.data(), bytes.size(), regs.rip, 0, &insn);
+    //     if (count > 0) {
+    //         size_t j;
+    //         for (j = 0; j < count; j++) {
+    //             printf("0x%" PRIx64, insn[j].address);
+    //
+    //             for (int i = 0; i < insn[j].size; i++)
+    //             {
+    //                 printf("%x ", insn[j].bytes[i]);
+    //             }
+    //
+    //             printf(": %s %s\n", insn[j].mnemonic,
+    //                     insn[j].op_str);
+    //         }
+    //
+    //         cs_free(insn, count);
+    //     } else
+    //         printf("ERROR: Failed to disassemble given code!\n");
+    //
+    //     cs_close(&handle);
+    }
+
+    if (!process.has_value()) ImGui::EndDisabled();
+
     ImGui::End();
+
+
 
     // ----- end main window
 
-    draw_scan_results(pid);
+    draw_scan_results();
 
-    draw_addr_table(pid);
-
-
-    scan_mutex.unlock();
+    draw_addr_table();
 }
 
-void Scanner::draw_scan_results(pid_t pid)
+void Scanner::draw_scan_results()
 {
     ImGui::Begin("Scan Results");
     ImGui::Text("Found: %lu", scanned_addrs.size());
@@ -384,7 +588,7 @@ void Scanner::draw_scan_results(pid_t pid)
                 // Value column
                 ImGui::TableNextColumn();
 
-                scan_value.visit([pid, addr = scanned_addrs[i]]<typename T>(const T& val)
+                scan_value.visit([addr = scanned_addrs[i], pid = process->pid]<typename T>(const T& val)
                 {
                     if constexpr (!std::is_same_v<T, std::string>)
                     {
@@ -421,7 +625,7 @@ void Scanner::draw_scan_results(pid_t pid)
 
 }
 
-void Scanner::draw_addr_table(pid_t pid)
+void Scanner::draw_addr_table()
 {
     ImGui::Begin("Address Table");
 
@@ -461,7 +665,7 @@ void Scanner::draw_addr_table(pid_t pid)
             }
             ImGui::SameLine(); // Needed or the selectable eats a column
 
-            ScanType new_val = entry.value.visit([pid, &entry]<typename T>(const T& val)
+            ScanType new_val = entry.value.visit([pid = process->pid, &entry]<typename T>(const T& val)
             {
                 if constexpr (!std::is_same_v<T, std::string>)
                 {
@@ -540,7 +744,7 @@ void Scanner::draw_addr_table(pid_t pid)
 
             if (ImGui::IsItemDeactivatedAfterEdit())
             {
-                new_val.visit([pid, &entry]<typename T>(const T& val)
+                new_val.visit([pid = process->pid, &entry]<typename T>(const T& val)
                 {
                     if constexpr (!std::is_same_v<T, std::string>)
                     {

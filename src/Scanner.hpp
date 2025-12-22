@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "MemUtils.hpp"
+#include "Process.hpp"
 
 class Scanner
 {
@@ -70,22 +71,26 @@ public:
     // Address table
     std::vector<AddrTableEntry> addr_table_entries;
 
+    std::optional<Process> process;
+
 
 
     static constexpr std::array SCAN_TYPE_LABELS {"1 Byte", "2 Bytes", "4 Bytes", "8 Bytes", "Float", "Double", "String"};
     static constexpr std::array SCAN_COMPARISON_LABELS {"Equal to", "Less than", "Greater than", "Unknown (Add all)", "Increased", "Decreased", "Unchanged", "Changed"};
 
+    Scanner() = default;
 
+    void set_process(std::optional<Process> process);
 
 
     /** Scan the memory for the first time */
-    void scan_memory(pid_t pid, const std::vector<std::vector<MemUtils::AddressMapping>>& mappings);
+    void scan_memory(const std::vector<std::vector<MemUtils::AddressMapping>>& mappings);
     /** Scan the memory when scanned_addrs already contains found addresses */
-    void rescan_memory(pid_t pid);
+    void rescan_memory();
 
-    void draw(pid_t pid);
-    void draw_scan_results(pid_t pid);
-    void draw_addr_table(pid_t pid);
+    void draw();
+    void draw_scan_results();
+    void draw_addr_table();
 
     static void draw_scantype_input(ScanType& value, const char* label);
 };
