@@ -9,11 +9,13 @@
 #include <SDL3/SDL_video.h>
 #include <sys/types.h>
 #include <print>
+#include <queue>
 
+#include "AppState.hpp"
 #include "MemUtils.hpp"
-#include "ProcessManager.hpp"
-#include "Scanner.hpp"
-
+#include "Process.hpp"
+#include "windows/ScanWindow.hpp"
+#include "windows/Window.hpp"
 
 
 class Application
@@ -21,26 +23,28 @@ class Application
 
     // Window stuff
     SDL_GLContext gl_context;
-    SDL_Window* window;
+    SDL_Window* sdl_window;
 
-    pid_t pid = 7304; // TODO: Move pid and other process stuff into class
     std::string process_name;
 
+    AppState state;
 
-    Scanner scanner;
-    ProcessManager process_manager;
+    std::array<std::unique_ptr<Window>, static_cast<int>(AppState::WINDOW_LENGTH)> windows = { std::make_unique<ScanWindow>(state) };
 
-
-
+    // map of window ids to window pts
+    // open window function which checks if window exists, then forwards arguments to window constructor
 
 
 public:
-    static std::vector<std::vector<MemUtils::AddressMapping>> get_mappings(pid_t pid, bool include_libs = true); // TODO: Move into process information class
-
     bool done = false;
 
     Application();
     ~Application();
+
+    void handle_events();
+
+    void handle_event(OpenDebugWindowEvent data);
+    void handle_event(SetProcess data);
 
     void draw_frame();
 };

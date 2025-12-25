@@ -15,13 +15,10 @@
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_sdl3.h"
+#include "windows/ScanWindow.hpp"
 
 Application::Application()
 {
-    // std::print("Enter PID: ");
-    // std::cin >> this->pid;
-    // this->map_to_scan = *std::ranges::find_if(mappings, [](const auto& mapping) { return strcmp(mapping.pathname, "[stack]") == 0;});
-
     // Setup SDL
     // [If using SDL_MAIN_USE_CALLBACKS: all code below until the main loop starts would likely be your SDL_AppInit() function]
     if (!SDL_Init(SDL_INIT_VIDEO))
@@ -35,21 +32,21 @@ Application::Application()
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
     float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
     SDL_WindowFlags window_flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
-    this->window = SDL_CreateWindow("Cheat_Engine_Linux", static_cast<int>(1280 * main_scale), static_cast<int>(800 * main_scale), window_flags);
-    if (window == nullptr)
+    this->sdl_window = SDL_CreateWindow("Cheat_Engine_Linux", static_cast<int>(1280 * main_scale), static_cast<int>(800 * main_scale), window_flags);
+    if (sdl_window == nullptr)
     {
         throw std::runtime_error(std::format("Error: SDL_CreateWindow(): %s\n", SDL_GetError()));
     }
-    this->gl_context = SDL_GL_CreateContext(window);
+    this->gl_context = SDL_GL_CreateContext(sdl_window);
     if (gl_context == nullptr)
     {
         throw std::runtime_error(std::format("Error: SDL_GL_CreateContext(): %s\n", SDL_GetError()));
     }
 
-    SDL_GL_MakeCurrent(window, gl_context);
+    SDL_GL_MakeCurrent(sdl_window, gl_context);
     SDL_GL_SetSwapInterval(1); // Enable vsync
-    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    SDL_ShowWindow(window);
+    SDL_SetWindowPosition(sdl_window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    SDL_ShowWindow(sdl_window);
 
     // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
@@ -68,7 +65,7 @@ Application::Application()
     style.FontScaleDpi = main_scale;        // Set initial font scale. (using io.ConfigDpiScaleFonts=true makes this unnecessary. We leave both here for documentation purpose)
 
     // Setup Platform/Renderer backends
-    ImGui_ImplSDL3_InitForOpenGL(window, gl_context);
+    ImGui_ImplSDL3_InitForOpenGL(sdl_window, gl_context);
     ImGui_ImplOpenGL3_Init();
 }
 
@@ -81,7 +78,7 @@ Application::~Application()
     ImGui::DestroyContext();
 
     SDL_GL_DestroyContext(this->gl_context);
-    SDL_DestroyWindow(this->window);
+    SDL_DestroyWindow(this->sdl_window);
     SDL_Quit();
 }
 
@@ -100,12 +97,12 @@ void Application::draw_frame()
         ImGui_ImplSDL3_ProcessEvent(&event);
         if (event.type == SDL_EVENT_QUIT)
             done = true;
-        if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window))
+        if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(sdl_window))
             done = true;
     }
 
     // [If using SDL_MAIN_USE_CALLBACKS: all code below would likely be your SDL_AppIterate() function]
-    if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED)
+    if (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_MINIMIZED)
     {
         SDL_Delay(10);
         return;
@@ -122,22 +119,40 @@ void Application::draw_frame()
 
     ImGuiIO& io = ImGui::GetIO();
 
-    // TODO: Shared state struct:
-    // - pid
-    // -
 
+    // process_manager.draw();
+    //
+    // // if the selected process changed
+    // if (process_manager.updated)
+    // {
+    //     scanner.set_process(process_manager.current);
+    //     process_manager.updated = false;
+    // }
+    //
+    // scanner.draw();
 
-    process_manager.draw();
+    // state.open_window<ScanWindow>(AppState::SCANNER, state);
+    //
+    // if ()
+    // {
+    //     this->process = std::move(process);
+    //     // Close all windows
+    //     for (auto& window : windows)
+    //     {
+    //         window = nullptr;
+    //     }
+    //     // Reopen main window
+    //     AppState& x = *this;
+    //     // windows[WindowID::SCANNER] = std::make_unique<ScanWindow>(x);
+    // }
 
-    // if the selected process changed
-    if (process_manager.updated)
+    this->handle_events();
+
+    for (const auto& window : windows)
     {
-        scanner.set_process(process_manager.current);
-        process_manager.updated = false;
+        if (window)
+            window->draw();
     }
-
-    scanner.draw();
-
 
 
 
@@ -148,82 +163,41 @@ void Application::draw_frame()
     glClearColor(clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w);
     glClear(GL_COLOR_BUFFER_BIT);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-    SDL_GL_SwapWindow(window);
+    SDL_GL_SwapWindow(sdl_window);
 }
 
-std::vector<std::vector<MemUtils::AddressMapping>> Application::get_mappings(pid_t pid, bool include_libs)
+
+
+
+void Application::handle_events()
 {
-    auto tp = std::chrono::system_clock::now();
-    std::filesystem::path exe_path = std::filesystem::read_symlink(std::format("/proc/{}/exe", pid));
-
-    std::vector<std::vector<MemUtils::AddressMapping>> mappings;
-
-    std::ifstream maps{std::format("/proc/{}/maps", pid)};
-
-    while (true)
+    if (state.events.empty()) return;
+    do
     {
-        MemUtils::AddressMapping mapping{};
-        // parse lines in /proc/pid/maps
-
-        maps >> std::hex >> mapping.start;
-        if (maps.eof()) break;
-        maps.get(); // move passed dash
-        maps >> mapping.end;
-        maps.get(); // move passed space
-        if (maps.get() == 'r') mapping.permissions |= 0x1;
-        if (maps.get() == 'w') mapping.permissions |= 0x2;
-        if (maps.get() == 'x') mapping.permissions |= 0x4;
-
-        int p_or_s = maps.get();
-        if (p_or_s == 'p') mapping.permissions |= 0x8;
-        if (p_or_s == 's') mapping.permissions |= 0x10;
-
-        maps >> mapping.offset;
-        maps >> std::dec;
-
-        int dev_maj, dev_min; // Unused
-        maps >> dev_maj;
-        maps.get();
-        maps >> dev_min;
-
-        int inode; // Unused
-        maps >> inode;
-
-        std::getline(maps, mapping.pathname);
-        // trim leading whitespace
-        auto it = std::ranges::find_if_not(mapping.pathname, [](char c) { return std::isspace(c); });
-        mapping.pathname.erase(mapping.pathname.begin(), it);
-
-
-        if ((mapping.permissions & 0x1) == 0) continue; // dont include mappings that are unreadable
-
-
-
-        if (mapping.pathname == exe_path
-            || mapping.pathname.empty() // always include unnamed regions
-            || mapping.pathname == "[heap]" || mapping.pathname.contains("[stack") // catch stacks marked with thread ids: [stack:tid]
-            || (include_libs && (mapping.pathname.rfind(".so") != std::string::npos || mapping.permissions & 0x10)))
+        AppEvent& event = state.events.front();
+        event.visit([this](auto event_data)
         {
-            auto it = std::ranges::find_if(mappings, [&mapping](const std::vector<MemUtils::AddressMapping>& other_mapping) { return other_mapping[0].pathname == mapping.pathname; });
-            if (it != mappings.end())
-            {
-                it->push_back(mapping);
-            }
-            else
-            {
-                mappings.emplace_back(1, mapping);
-            }
-        }
+            this->handle_event(std::move(event_data));
+        });
 
-        // include if:
-        // - pathname same as pid
-        // - unnamed mapping
-        // - [heap] || [stack]
-        // - libraries enabled && pathname includes .so || mapped as shared
+
+        state.events.pop();
     }
-    std::println("Took {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - tp).count());
-    return mappings;
+    while (!state.events.empty());
 }
 
+void Application::handle_event(OpenDebugWindowEvent data)
+{
 
+}
+
+void Application::handle_event(SetProcess data)
+{
+    for (auto& window : windows)
+    {
+        window = nullptr;
+    }
+    state.process = std::move(data.new_process);
+    windows[0] = std::make_unique<ScanWindow>(state);
+}
 

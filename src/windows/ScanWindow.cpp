@@ -1,4 +1,4 @@
-#include "Scanner.hpp"
+#include "ScanWindow.hpp"
 
 
 #include <algorithm>
@@ -15,40 +15,40 @@
 #include <sys/procfs.h>
 #include <elf.h>
 #include <filesystem>
+#include <fstream>
 
-
-#include "Application.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "capstone/capstone.h"
+#include "events/SetProcess.hpp"
 #include "misc/cpp/imgui_stdlib.h"
 
 
-void Scanner::set_process(std::optional<Process> new_process)
-{
-    // Clear old stuff
-    cancelled = true;
-    if (scan_thread.joinable()) scan_thread.join();
-    scanned_addrs.clear();
-    scanned_old_values.visit([](auto& vec) { vec.clear(); });
-    scanning = false;
-    scan_value = int32_t{0};
-    scan_comparison = ScanComparisons::EQUAL_TO;
-    mappings.clear();
-    show_library_mappings = false;
-    mapping_select_menu_open = false;
-    selected_mapping.clear();
-    selected_result_addrs.clear();
-    addr_table_entries.clear();
+// void ScanWindow::set_process(std::optional<Process> new_process)
+// {
+//     // Clear old stuff
+//     cancelled = true;
+//     if (scan_thread.joinable()) scan_thread.join();
+//     scanned_addrs.clear();
+//     scanned_old_values.visit([](auto& vec) { vec.clear(); });
+//     scanning = false;
+//     scan_value = int32_t{0};
+//     scan_comparison = ScanComparisons::EQUAL_TO;
+//     mappings.clear();
+//     show_library_mappings = false;
+//     mapping_select_menu_open = false;
+//     selected_mapping.clear();
+//     selected_result_addrs.clear();
+//     addr_table_entries.clear();
+//
+//     if (!new_process.has_value()) state.process = std::nullopt;
+//     else
+//     {
+//         state.process = std::move(new_process);
+//     }
+// }
 
-    if (!new_process.has_value()) process = std::nullopt;
-    else
-    {
-        process = std::move(new_process);
-    }
-}
-
-void Scanner::scan_memory(const std::vector<std::vector<MemUtils::AddressMapping>>& mappings)
+void ScanWindow::scan_memory(const std::vector<std::vector<MemUtils::AddressMapping>>& mappings)
 {
     cancelled = false;
     using MemUtils::AddressMapping;
@@ -81,7 +81,7 @@ void Scanner::scan_memory(const std::vector<std::vector<MemUtils::AddressMapping
 
                     if constexpr (!std::is_same_v<T, std::string>)
                     {
-                        pid_t pid = process->pid;
+                        pid_t pid = state.process->pid;
                         switch (scan_comparison)
                         {
                         case EQUAL_TO:
@@ -139,7 +139,7 @@ void Scanner::scan_memory(const std::vector<std::vector<MemUtils::AddressMapping
     }};
 }
 
-void Scanner::rescan_memory()
+void ScanWindow::rescan_memory()
 {
     cancelled = false;
     scan_thread = std::thread{[this]
@@ -171,7 +171,7 @@ void Scanner::rescan_memory()
                     iovec from{reinterpret_cast<void*>(current_buffer_start), pagesize};
                     iovec to{page_buffer.data(), pagesize};
 
-                    ssize_t status = process_vm_readv(process->pid, &to, 1, &from, 1, 0);
+                    ssize_t status = process_vm_readv(state.process->pid, &to, 1, &from, 1, 0);
                     if (status < 0)
                     {
                         // perror("Error: ");
@@ -234,15 +234,15 @@ void Scanner::rescan_memory()
     }};
 }
 
-void Scanner::draw()
+void ScanWindow::draw()
 {
-
+    draw_process_manager();
     bool currently_scanning = scanning;
     std::unique_lock lock{scan_mutex};
 
     ImGui::Begin("Scanner");
 
-    if (!process.has_value()) ImGui::BeginDisabled();
+    if (!state.process.has_value()) ImGui::BeginDisabled();
 
     if (ImGui::BeginPopup("invalid_id"))
     {
@@ -272,7 +272,7 @@ void Scanner::draw()
 
         if (scanned_addrs.empty() && ImGui::Button("Scan"))
         {
-            mappings = Application::get_mappings(process->pid, show_library_mappings);
+            mappings = MemUtils::get_mappings(state.process->pid, show_library_mappings);
             auto it = std::ranges::find_if(mappings, [this](auto& same_name_mappings){ return same_name_mappings[0].pathname == selected_mapping; });
             if (it == mappings.end())
             {
@@ -336,7 +336,7 @@ void Scanner::draw()
         if (!mapping_select_menu_open)
         {
             // Only get the mappings once when the dropdown is opened
-            mappings = Application::get_mappings(process->pid, show_library_mappings);
+            mappings = MemUtils::get_mappings(state.process->pid, show_library_mappings);
             mapping_select_menu_open = true;
         }
         if (ImGui::Selectable("All")) selected_mapping.clear();
@@ -374,7 +374,7 @@ void Scanner::draw()
 
         // set debug watchpoint at ammo address with length of 4 bytes with read or write level.
 
-        for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task/", process->pid)})
+        for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task/", state.process->pid)})
         {
             pid_t tid = std::stoi(dir.path().filename());
             long status;
@@ -428,7 +428,7 @@ void Scanner::draw()
                 std::vector<uint8_t> bytes(asm_bytes);
                 for (int i = 0; i < asm_bytes; i++)
                 {
-                    bytes[i] = MemUtils::read_addr<uint8_t>(process->pid, regs.rip + i - 10);
+                    bytes[i] = MemUtils::read_addr<uint8_t>(state.process->pid, regs.rip + i - 10);
                 }
 
 
@@ -456,7 +456,7 @@ void Scanner::draw()
 
 
                 // clear breakpoints
-                for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task/", process->pid)})
+                for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task/", state.process->pid)})
                 {
                     pid_t tid = std::stoi(dir.path().filename());
 
@@ -524,7 +524,7 @@ void Scanner::draw()
     //     cs_close(&handle);
     }
 
-    if (!process.has_value()) ImGui::EndDisabled();
+    if (!state.process.has_value()) ImGui::EndDisabled();
 
     ImGui::End();
 
@@ -537,7 +537,7 @@ void Scanner::draw()
     draw_addr_table();
 }
 
-void Scanner::draw_scan_results()
+void ScanWindow::draw_scan_results()
 {
     ImGui::Begin("Scan Results");
     ImGui::Text("Found: %lu", scanned_addrs.size());
@@ -588,7 +588,7 @@ void Scanner::draw_scan_results()
                 // Value column
                 ImGui::TableNextColumn();
 
-                scan_value.visit([addr = scanned_addrs[i], pid = process->pid]<typename T>(const T& val)
+                scan_value.visit([addr = scanned_addrs[i], pid = state.process->pid]<typename T>(const T& val)
                 {
                     if constexpr (!std::is_same_v<T, std::string>)
                     {
@@ -625,7 +625,7 @@ void Scanner::draw_scan_results()
 
 }
 
-void Scanner::draw_addr_table()
+void ScanWindow::draw_addr_table()
 {
     ImGui::Begin("Address Table");
 
@@ -663,9 +663,22 @@ void Scanner::draw_addr_table()
                 entry.selected = true;
                 // TODO: Ctrl click / Shift click to select multiple
             }
+
+            if (ImGui::BeginPopupContextItem(nullptr, ImGuiPopupFlags_MouseButtonRight))
+            {
+                if (ImGui::MenuItem("Find out what accesses this address"))
+                {
+                    // Handle Action 1 for this row
+                }
+                if (ImGui::MenuItem("Find out what writes to this address"))
+                {
+                    // Handle Action 2 for this row
+                }
+                ImGui::EndPopup();
+            }
             ImGui::SameLine(); // Needed or the selectable eats a column
 
-            ScanType new_val = entry.value.visit([pid = process->pid, &entry]<typename T>(const T& val)
+            ScanType new_val = entry.value.visit([pid = state.process->pid, &entry]<typename T>(const T& val)
             {
                 if constexpr (!std::is_same_v<T, std::string>)
                 {
@@ -744,7 +757,7 @@ void Scanner::draw_addr_table()
 
             if (ImGui::IsItemDeactivatedAfterEdit())
             {
-                new_val.visit([pid = process->pid, &entry]<typename T>(const T& val)
+                new_val.visit([pid = state.process->pid, &entry]<typename T>(const T& val)
                 {
                     if constexpr (!std::is_same_v<T, std::string>)
                     {
@@ -771,7 +784,7 @@ void Scanner::draw_addr_table()
     ImGui::End();
 }
 
-void Scanner::draw_scantype_input(ScanType& value, const char* label)
+void ScanWindow::draw_scantype_input(ScanType& value, const char* label)
 {
     value.visit([label]<typename T>(T& val)
     {
@@ -809,4 +822,114 @@ void Scanner::draw_scantype_input(ScanType& value, const char* label)
             // TODO: Implement strings
         }
     });
+}
+
+void ScanWindow::draw_process_manager()
+{
+    // Process information window
+    ImGui::Begin("Process Information");
+
+
+    if (ImGui::Button("Attach"))
+    {
+        set_keyboard_focus = true;
+        process_search_str.clear();
+        ImGui::OpenPopup(PROCESS_POPUP_TITLE);
+    }
+
+    if (ImGui::BeginPopupModal(PROCESS_POPUP_TITLE))
+    {
+        if (ImGui::Button("Refresh"))
+        {
+            processes.clear();
+        }
+        ImGui::SameLine();
+        if (set_keyboard_focus)
+        {
+            ImGui::SetKeyboardFocusHere();
+            set_keyboard_focus = false;
+        }
+        ImGui::InputTextWithHint("##process_search", "Search for process...", &process_search_str);
+
+        if (ImGui::BeginTable("process_list", 3, ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX))
+        {
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableSetupColumn("PID");
+            ImGui::TableSetupColumn("Name");
+            ImGui::TableSetupColumn("Path");
+            ImGui::TableHeadersRow();
+
+            if (processes.empty())
+            {
+                for (auto& dir : std::filesystem::directory_iterator{"/proc/"})
+                {
+                    std::ifstream status{dir.path() / "status"};
+                    pid_t pid;
+                    std::filesystem::path exe_path;
+                    try
+                    {
+                        pid = std::stoi(dir.path().filename());
+                        exe_path = std::filesystem::read_symlink(std::format("/proc/{}/exe", pid));
+                    }
+                    catch (...)
+                    {
+                        continue;
+                    }
+
+
+                    std::string line_str;
+                    std::string key;
+                    std::string name;
+                    while (std::getline(status, line_str))
+                    {
+                        std::istringstream line{std::move(line_str)};
+                        line >> key;
+                        if (key == "Name:")
+                        {
+                            line >> name;
+                            break;
+                        }
+                    }
+                    processes.emplace_back(pid, std::move(name), std::move(exe_path));
+                }
+            }
+            else
+            {
+                for (const Process& process : processes)
+                {
+                    if (!strcasestr(process.name.c_str(), process_search_str.c_str())
+                        && !strcasestr(process.path.c_str(), process_search_str.c_str())) continue;
+                    ImGui::TableNextRow();
+
+                    ImGui::TableNextColumn();
+                    if (ImGui::Selectable(std::format("{}", process.pid).c_str(), false, ImGuiSelectableFlags_SpanAllColumns))
+                    {
+                        state.send_event(SetProcess{process});
+                        ImGui::CloseCurrentPopup();
+                    }
+
+
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(process.name.c_str());
+
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(process.path.c_str());
+                }
+            }
+
+
+            ImGui::EndTable();
+        }
+
+        ImGui::EndPopup();
+    }
+
+    if (state.process.has_value())
+    {
+        ImGui::Text("Current process: %s", state.process->name.c_str());
+    }
+
+
+
+    ImGui::End();
 }

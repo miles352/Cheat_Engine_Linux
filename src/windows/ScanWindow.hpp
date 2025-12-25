@@ -1,4 +1,5 @@
 #pragma once
+#include "Window.hpp"
 #include <array>
 #include <cstdint>
 #include <mutex>
@@ -9,13 +10,17 @@
 #include <variant>
 #include <vector>
 
+#include "AppState.hpp"
 #include "MemUtils.hpp"
 #include "Process.hpp"
 
-class Scanner
-{
 
+class ScanWindow : public Window
+{
 public:
+    ScanWindow(AppState& state) : state(state) {};
+
+    void draw() override;
 
     using ScanType = std::variant<int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
     using ScanResultsValues = std::variant<std::vector<int8_t>, std::vector<int16_t>, std::vector<int32_t>, std::vector<int64_t>, std::vector<float>, std::vector<double>>;
@@ -42,7 +47,7 @@ public:
     };
 
 
-
+    AppState& state;
     /** Mutex used on the scanning thread. */
     std::mutex scan_mutex;
     std::thread scan_thread;
@@ -71,14 +76,20 @@ public:
     // Address table
     std::vector<AddrTableEntry> addr_table_entries;
 
-    std::optional<Process> process;
+    // TODO: Copy all uses of PROCESS when using on other threads
+
+    // Process manager stuff (top bar and process select menu)
+    void draw_process_manager();
+    std::vector<Process> processes;
+    static constexpr auto PROCESS_POPUP_TITLE = "Attach to Process";
+    std::string process_search_str;
+    // Flag to only set the keyboard focus to the search bar the first time the select menu appears
+    bool set_keyboard_focus;
 
 
 
     static constexpr std::array SCAN_TYPE_LABELS {"1 Byte", "2 Bytes", "4 Bytes", "8 Bytes", "Float", "Double", "String"};
     static constexpr std::array SCAN_COMPARISON_LABELS {"Equal to", "Less than", "Greater than", "Unknown (Add all)", "Increased", "Decreased", "Unchanged", "Changed"};
-
-    Scanner() = default;
 
     void set_process(std::optional<Process> process);
 
@@ -88,7 +99,6 @@ public:
     /** Scan the memory when scanned_addrs already contains found addresses */
     void rescan_memory();
 
-    void draw();
     void draw_scan_results();
     void draw_addr_table();
 

@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <fstream>
 #include <functional>
 #include <sched.h>
 #include <string>
@@ -9,6 +10,7 @@
 #include <unistd.h>
 #include <vector>
 #include <sys/uio.h>
+#include <print>
 
 namespace MemUtils
 {
@@ -91,5 +93,79 @@ namespace MemUtils
         }
 
         return std::pair{std::move(addrs), std::move(values)};
+    }
+
+    inline std::vector<std::vector<AddressMapping>> get_mappings(pid_t pid, bool include_libs)
+    {
+        auto tp = std::chrono::system_clock::now();
+        std::filesystem::path exe_path = std::filesystem::read_symlink(std::format("/proc/{}/exe", pid));
+
+        std::vector<std::vector<MemUtils::AddressMapping>> mappings;
+
+        std::ifstream maps{std::format("/proc/{}/maps", pid)};
+
+        while (true)
+        {
+            MemUtils::AddressMapping mapping{};
+            // parse lines in /proc/pid/maps
+
+            maps >> std::hex >> mapping.start;
+            if (maps.eof()) break;
+            maps.get(); // move passed dash
+            maps >> mapping.end;
+            maps.get(); // move passed space
+            if (maps.get() == 'r') mapping.permissions |= 0x1;
+            if (maps.get() == 'w') mapping.permissions |= 0x2;
+            if (maps.get() == 'x') mapping.permissions |= 0x4;
+
+            int p_or_s = maps.get();
+            if (p_or_s == 'p') mapping.permissions |= 0x8;
+            if (p_or_s == 's') mapping.permissions |= 0x10;
+
+            maps >> mapping.offset;
+            maps >> std::dec;
+
+            int dev_maj, dev_min; // Unused
+            maps >> dev_maj;
+            maps.get();
+            maps >> dev_min;
+
+            int inode; // Unused
+            maps >> inode;
+
+            std::getline(maps, mapping.pathname);
+            // trim leading whitespace
+            auto it = std::ranges::find_if_not(mapping.pathname, [](char c) { return std::isspace(c); });
+            mapping.pathname.erase(mapping.pathname.begin(), it);
+
+
+            if ((mapping.permissions & 0x1) == 0) continue; // dont include mappings that are unreadable
+
+
+
+            if (mapping.pathname == exe_path
+                || mapping.pathname.empty() // always include unnamed regions
+                || mapping.pathname == "[heap]" || mapping.pathname.contains("[stack") // catch stacks marked with thread ids: [stack:tid]
+                || (include_libs && (mapping.pathname.rfind(".so") != std::string::npos || mapping.permissions & 0x10)))
+            {
+                auto it = std::ranges::find_if(mappings, [&mapping](const std::vector<MemUtils::AddressMapping>& other_mapping) { return other_mapping[0].pathname == mapping.pathname; });
+                if (it != mappings.end())
+                {
+                    it->push_back(mapping);
+                }
+                else
+                {
+                    mappings.emplace_back(1, mapping);
+                }
+            }
+
+            // include if:
+            // - pathname same as pid
+            // - unnamed mapping
+            // - [heap] || [stack]
+            // - libraries enabled && pathname includes .so || mapped as shared
+        }
+        std::println("Took {}ms", std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now() - tp).count());
+        return mappings;
     }
 }
