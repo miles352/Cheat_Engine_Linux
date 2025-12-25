@@ -24,30 +24,6 @@
 #include "misc/cpp/imgui_stdlib.h"
 
 
-// void ScanWindow::set_process(std::optional<Process> new_process)
-// {
-//     // Clear old stuff
-//     cancelled = true;
-//     if (scan_thread.joinable()) scan_thread.join();
-//     scanned_addrs.clear();
-//     scanned_old_values.visit([](auto& vec) { vec.clear(); });
-//     scanning = false;
-//     scan_value = int32_t{0};
-//     scan_comparison = ScanComparisons::EQUAL_TO;
-//     mappings.clear();
-//     show_library_mappings = false;
-//     mapping_select_menu_open = false;
-//     selected_mapping.clear();
-//     selected_result_addrs.clear();
-//     addr_table_entries.clear();
-//
-//     if (!new_process.has_value()) state.process = std::nullopt;
-//     else
-//     {
-//         state.process = std::move(new_process);
-//     }
-// }
-
 void ScanWindow::scan_memory(const std::vector<std::vector<MemUtils::AddressMapping>>& mappings)
 {
     cancelled = false;

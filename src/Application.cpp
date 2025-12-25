@@ -119,39 +119,11 @@ void Application::draw_frame()
 
     ImGuiIO& io = ImGui::GetIO();
 
-
-    // process_manager.draw();
-    //
-    // // if the selected process changed
-    // if (process_manager.updated)
-    // {
-    //     scanner.set_process(process_manager.current);
-    //     process_manager.updated = false;
-    // }
-    //
-    // scanner.draw();
-
-    // state.open_window<ScanWindow>(AppState::SCANNER, state);
-    //
-    // if ()
-    // {
-    //     this->process = std::move(process);
-    //     // Close all windows
-    //     for (auto& window : windows)
-    //     {
-    //         window = nullptr;
-    //     }
-    //     // Reopen main window
-    //     AppState& x = *this;
-    //     // windows[WindowID::SCANNER] = std::make_unique<ScanWindow>(x);
-    // }
-
     this->handle_events();
 
     for (const auto& window : windows)
     {
-        if (window)
-            window->draw();
+        if (window) window->draw();
     }
 
 

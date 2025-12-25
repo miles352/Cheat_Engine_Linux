@@ -3,7 +3,6 @@
 #include <array>
 #include <cstdint>
 #include <mutex>
-#include <set>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -18,7 +17,7 @@
 class ScanWindow : public Window
 {
 public:
-    ScanWindow(AppState& state) : state(state) {};
+    explicit ScanWindow(AppState& state) : state(state) {};
 
     void draw() override;
 
@@ -84,14 +83,12 @@ public:
     static constexpr auto PROCESS_POPUP_TITLE = "Attach to Process";
     std::string process_search_str;
     // Flag to only set the keyboard focus to the search bar the first time the select menu appears
-    bool set_keyboard_focus;
+    bool set_keyboard_focus{};
 
 
 
     static constexpr std::array SCAN_TYPE_LABELS {"1 Byte", "2 Bytes", "4 Bytes", "8 Bytes", "Float", "Double", "String"};
     static constexpr std::array SCAN_COMPARISON_LABELS {"Equal to", "Less than", "Greater than", "Unknown (Add all)", "Increased", "Decreased", "Unchanged", "Changed"};
-
-    void set_process(std::optional<Process> process);
 
 
     /** Scan the memory for the first time */
