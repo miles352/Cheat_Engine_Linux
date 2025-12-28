@@ -16,9 +16,6 @@
 
 class ScanWindow : public Window
 {
-public:
-    explicit ScanWindow(AppState& state) : state(state) {};
-
     void draw() override;
 
     using ScanType = std::variant<int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
@@ -100,4 +97,6 @@ public:
     void draw_addr_table();
 
     static void draw_scantype_input(ScanType& value, const char* label);
+public:
+    explicit ScanWindow(AppState& state) : state(state) {};
 };

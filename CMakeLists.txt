@@ -20,6 +20,9 @@ add_executable(${CMAKE_PROJECT_NAME}
         src/AppState.hpp
         src/events/OpenDebugWindowEvent.hpp
         src/events/SetProcess.hpp
+        src/windows/DebugWindow.cpp
+        src/windows/DebugWindow.hpp
+        src/events/CloseWindowEvent.hpp
         #        src/test1.cpp
 )
 

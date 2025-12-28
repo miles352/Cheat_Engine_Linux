@@ -5,10 +5,11 @@
 #include <queue>
 
 #include "Process.hpp"
+#include "events/CloseWindowEvent.hpp"
 #include "events/OpenDebugWindowEvent.hpp"
-#include "events/SetProcess.hpp"
+#include "events/SetProcessEvent.hpp"
 
-using AppEvent = std::variant<OpenDebugWindowEvent, SetProcess>;
+using AppEvent = std::variant<OpenDebugWindowEvent, SetProcessEvent, CloseWindowEvent>;
 
 struct AppState
 {

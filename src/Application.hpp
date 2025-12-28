@@ -25,7 +25,8 @@ class Application
     void handle_events();
 
     void handle_event(OpenDebugWindowEvent data);
-    void handle_event(SetProcess data);
+    void handle_event(SetProcessEvent data);
+    void handle_event(CloseWindowEvent data);
 
 public:
     Application();

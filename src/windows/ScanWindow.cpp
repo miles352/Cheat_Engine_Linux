@@ -20,7 +20,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "capstone/capstone.h"
-#include "events/SetProcess.hpp"
+#include "events/SetProcessEvent.hpp"
 #include "misc/cpp/imgui_stdlib.h"
 
 
@@ -640,15 +640,16 @@ void ScanWindow::draw_addr_table()
                 // TODO: Ctrl click / Shift click to select multiple
             }
 
+            ImGui::PopStyleColor(2);
             if (ImGui::BeginPopupContextItem(nullptr, ImGuiPopupFlags_MouseButtonRight))
             {
                 if (ImGui::MenuItem("Find out what accesses this address"))
                 {
-                    // Handle Action 1 for this row
+                    state.send_event(OpenDebugWindowEvent{});
                 }
                 if (ImGui::MenuItem("Find out what writes to this address"))
                 {
-                    // Handle Action 2 for this row
+
                 }
                 ImGui::EndPopup();
             }
@@ -686,7 +687,7 @@ void ScanWindow::draw_addr_table()
             ImGui::Text("0x%lx", entry.addr);
             ImGui::TableNextColumn();
 
-            ImGui::PopStyleColor(2);
+
 
             size_t new_type = new_val.index();
             if (ImGui::BeginCombo("##combo_typeselect", SCAN_TYPE_LABELS[new_val.index()]))
@@ -880,7 +881,7 @@ void ScanWindow::draw_process_manager()
                     ImGui::TableNextColumn();
                     if (ImGui::Selectable(std::format("{}", process.pid).c_str(), false, ImGuiSelectableFlags_SpanAllColumns))
                     {
-                        state.send_event(SetProcess{process});
+                        state.send_event(SetProcessEvent{process});
                         ImGui::CloseCurrentPopup();
                     }
 

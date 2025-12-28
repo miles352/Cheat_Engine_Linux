@@ -1,7 +1,7 @@
 #pragma once
 #include "Process.hpp"
 
-struct SetProcess
+struct SetProcessEvent
 {
     Process new_process;
 };

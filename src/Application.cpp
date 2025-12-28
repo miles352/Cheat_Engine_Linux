@@ -15,7 +15,9 @@
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_sdl3.h"
+#include "windows/DebugWindow.hpp"
 #include "windows/ScanWindow.hpp"
+#include "windows/Window.hpp"
 
 Application::Application()
 {
@@ -160,10 +162,10 @@ void Application::handle_events()
 
 void Application::handle_event(OpenDebugWindowEvent data)
 {
-
+    windows[Window::DEBUG] = std::make_unique<DebugWindow>(state);
 }
 
-void Application::handle_event(SetProcess data)
+void Application::handle_event(SetProcessEvent data)
 {
     for (auto& window : windows)
     {
@@ -171,5 +173,10 @@ void Application::handle_event(SetProcess data)
     }
     state.process = std::move(data.new_process);
     windows[0] = std::make_unique<ScanWindow>(state);
+}
+
+void Application::handle_event(CloseWindowEvent data)
+{
+    windows[data.id] = nullptr;
 }
 
