@@ -44,9 +44,9 @@ public:
     struct SetBreakpointCommand
     {
         Breakpoint breakpoint;
-        std::function<void(user_regs_struct)> callback;
+        std::function<void(user_regs_struct, pid_t)> callback;
         size_t index;
-        SetBreakpointCommand(const Breakpoint& breakpoint, std::function<void(user_regs_struct)> callback, size_t index = 0) : breakpoint(breakpoint), callback(std::move(callback)), index(index) {};
+        SetBreakpointCommand(const Breakpoint& breakpoint, std::function<void(user_regs_struct, pid_t)> callback, size_t index = 0) : breakpoint(breakpoint), callback(std::move(callback)), index(index) {};
     };
 
     struct RemoveBreakpointCommand
@@ -87,7 +87,7 @@ public:
     explicit Debugger(pid_t pid);
     ~Debugger();
 
-    std::optional<Breakpoint> get_breakpoint(size_t index = 0);
+    std::optional<std::pair<Breakpoint, std::function<void(user_regs_struct, pid_t)>>> get_breakpoint(size_t index = 0);
     void send_command(DebugCommand&& command);
 
     /** Returns whether the process is still valid */
@@ -98,8 +98,9 @@ private:
     std::unordered_set<pid_t> tids;
     // TODO: This is specific to x86-64 intel cpus, unknown if it works for others
     // Each index corresponds to a debug register: dr0, dr1, dr2, dr3
-    std::array<std::optional<Breakpoint>, 4> breakpoints;
-    std::array<std::optional<std::function<void(user_regs_struct)>>, 4> callbacks;
+    std::array<std::optional<
+        std::pair<Breakpoint, std::function<void(user_regs_struct, pid_t)>
+    >>, 4> breakpoints;
 
     std::thread debug_thread;
     std::atomic_bool debug_thread_running;

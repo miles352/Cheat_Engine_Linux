@@ -12,7 +12,7 @@ class BreakpointWatcherWindow : public Window
     Debugger debugger;
 
     void draw() override;
-    void handle_breakpoint(user_regs_struct regs);
+    void handle_breakpoint(user_regs_struct regs, pid_t tid);
 
     struct BreakpointHit
     {

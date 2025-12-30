@@ -47,9 +47,10 @@ void BreakpointWatcherWindow::draw()
     ImGui::End();
 }
 
-void BreakpointWatcherWindow::handle_breakpoint(user_regs_struct regs)
+void BreakpointWatcherWindow::handle_breakpoint(user_regs_struct regs, pid_t tid)
 {
     breakpoint_hits.emplace(regs.rip, BreakpointHit{"test", regs, 1});
+    printf("Breakpoint: %llx\n", regs.rip);
 }
 
 // on breakpoint want:

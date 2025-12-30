@@ -29,9 +29,9 @@ Debugger::~Debugger()
     std::println("Thread joined");
 }
 
-std::optional<Debugger::Breakpoint> Debugger::get_breakpoint(size_t index)
+std::optional<std::pair<Debugger::Breakpoint, std::function<void(user_regs_struct, pid_t)>>> Debugger::get_breakpoint(size_t index)
 {
-    std::unique_lock lock{debug_mutex};
+    std::lock_guard lock{debug_mutex};
     return breakpoints.at(index);
 }
 
@@ -88,6 +88,23 @@ void Debugger::debug_thread_fn()
 
         if (handle_events()) break;
     }
+
+    // Clean up stuff on the debug thread like ptrace and breakpoints
+
+    for (pid_t tid : tids)
+    {
+        ptrace(PTRACE_INTERRUPT, tid, 0, 0);
+        int status;
+        waitpid(tid, &status, 0);
+        long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]), 0);
+        for (int i = 0; i < breakpoints.size(); i++)
+        {
+            dr7 &= ~(1u << i * 2); // clear local enable bits
+        }
+
+        ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
+        ptrace(PTRACE_DETACH, tid, 0, 0);
+    }
 }
 
 void Debugger::handle_commands()
@@ -123,8 +140,7 @@ void Debugger::handle_commands()
                     ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
                     ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[c.index]), c.breakpoint.addr);
 
-                    breakpoints[c.index] = c.breakpoint;
-                    callbacks[c.index] = std::move(c.callback);
+                    breakpoints[c.index] = { c.breakpoint, std::move(c.callback) };
                 }
                 else if constexpr (std::is_same_v<T, RemoveBreakpointCommand>)
                 {
@@ -135,7 +151,6 @@ void Debugger::handle_commands()
                     ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
                     breakpoints[c.index] = std::nullopt;
-                    callbacks[c.index] = std::nullopt;
                 }
                 else if constexpr (std::is_same_v<T, DisableBreakpointCommand>)
                 {
@@ -144,7 +159,7 @@ void Debugger::handle_commands()
                     dr7 &= ~enabled_shift;                      // disable the breakpoint
                     ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
-                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->enabled = false;
+                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->first.enabled = false;
                 }
                 else if constexpr (std::is_same_v<T, EnableBreakpointCommand>)
                 {
@@ -153,7 +168,7 @@ void Debugger::handle_commands()
                     dr7 |= enabled_shift;                      // enable the breakpoint
                     ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
-                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->enabled = true;
+                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->first.enabled = true;
                 }
                 else if constexpr (std::is_same_v<T, ChangeBreakpointModeCommand>)
                 {
@@ -163,7 +178,7 @@ void Debugger::handle_commands()
                     dr7 |= (c.new_mode << mode_shift);          // set the mode bits to the enum value
                     ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
-                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->mode = c.new_mode;
+                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->first.mode = c.new_mode;
                 }
                 else if constexpr (std::is_same_v<T, ChangeBreakpointRangeCommand>)
                 {
@@ -173,7 +188,7 @@ void Debugger::handle_commands()
                     dr7 |= (c.new_range << len_shift);   // set the len bits to the enum value
                     ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
-                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->range = c.new_range;
+                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->first.range = c.new_range;
                 }
             });
             ptrace(PTRACE_CONT, tid, 0, 0);
@@ -221,13 +236,22 @@ bool Debugger::handle_events()
             if (ptrace(PTRACE_CONT, pid, 0, 0) == -1) perror("PTRACE_CONT Error");
             std::println("New Thread created: {}", child_tid);
         }
-        else if (WSTOPSIG(status) == SIGTRAP)
+        else if (WSTOPSIG(status) == SIGTRAP) // breakpoint hit
         {
-            if (ptrace(PTRACE_POKEUSER, pid, offsetof(user, u_debugreg[6]), 0) == -1) perror("Pokeuser");
-
+            long dr6 = ptrace(PTRACE_PEEKUSER, pid, offsetof(user, u_debugreg[6]), 0);
             user_regs_struct regs;
             long stat = ptrace(PTRACE_GETREGS, pid, 0, &regs);
-            std::println("Breakpoint hit! RIP: 0x{:x} RDX: 0x{:x} RCX: 0x{:x} RBX: 0x{:x} RAX: 0x{:x} RSI: 0x{:x} RSP: 0x{:x}", regs.rip, regs.rdx, regs.rcx, regs.rbx, regs.rax, regs.rsi, regs.rsp);
+            // look for enabled breakpoints that are also in dr6
+            for (int i = 0; i < breakpoints.size(); i++)
+            {
+                if (!breakpoints[i].has_value()) continue;
+                if ((1u << i) & dr6) // if the breakpoint condition detect flag is set
+                {
+                    breakpoints[i]->second(regs, pid); // call the callback function
+                }
+            }
+            if (ptrace(PTRACE_POKEUSER, pid, offsetof(user, u_debugreg[6]), 0) == -1) perror("Pokeuser"); // clear dr6
+
             if (ptrace(PTRACE_CONT, pid, 0, 0) == -1) perror("PTRACE_CONT Error");
         }
         else
