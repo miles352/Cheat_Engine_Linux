@@ -98,19 +98,17 @@ void Debugger::handle_commands()
         auto& command = commands.front();
         for (pid_t tid : tids)
         {
-            command.visit([tid]<typename T>(const T& c)
+            ptrace(PTRACE_INTERRUPT, tid, 0, 0);
+            int status;
+            waitpid(tid, &status, 0);
+            assert(WSTOPSIG(status) == SIGTRAP); // temporary
+            command.visit([tid, this]<typename T>(const T& c)
             {
                 if constexpr (std::is_same_v<T, SetBreakpointCommand>)
                 {
-                    // set dr(c.index) to c.addr
-                    // c.breakpoint.addr
-                    ptrace(PTRACE_INTERRUPT, tid, 0, 0);
-                    int status;
-                    waitpid(tid, &status, 0);
-                    assert(WSTOPSIG(status) == SIGTRAP); // temporary
-                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]));
+                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]), 0);
 
-                    const auto enabled_shift = 1u << c.index * 2;
+                    const unsigned int enabled_shift = 1u << c.index * 2;
                     if (c.breakpoint.enabled) dr7 |= enabled_shift;    // set the local enable bit
                     else dr7 &= ~enabled_shift;                        // clear the local enable bit
 
@@ -124,29 +122,61 @@ void Debugger::handle_commands()
 
                     ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
                     ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[c.index]), c.breakpoint.addr);
-                    ptrace(PTRACE_CONT, tid, 0, 0);
+
+                    breakpoints[c.index] = c.breakpoint;
+                    callbacks[c.index] = std::move(c.callback);
                 }
                 else if constexpr (std::is_same_v<T, RemoveBreakpointCommand>)
                 {
+                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]), 0);
+                    const unsigned int enabled_shift = 1u << c.index * 2;
+                    dr7 &= ~enabled_shift;                      // disable the breakpoint
+                    // other fields (address, mode, length) are left as they are because there is no unset value
+                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
+                    breakpoints[c.index] = std::nullopt;
+                    callbacks[c.index] = std::nullopt;
                 }
                 else if constexpr (std::is_same_v<T, DisableBreakpointCommand>)
                 {
+                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]), 0);
+                    const unsigned int enabled_shift = 1u << c.index * 2;
+                    dr7 &= ~enabled_shift;                      // disable the breakpoint
+                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
+                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->enabled = false;
                 }
                 else if constexpr (std::is_same_v<T, EnableBreakpointCommand>)
                 {
+                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]), 0);
+                    const unsigned int enabled_shift = 1u << c.index * 2;
+                    dr7 |= enabled_shift;                      // enable the breakpoint
+                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
+                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->enabled = true;
                 }
                 else if constexpr (std::is_same_v<T, ChangeBreakpointModeCommand>)
                 {
+                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]), 0);
+                    const unsigned int mode_shift = 16u + c.index * 4;
+                    dr7 &= ~(0b11 << mode_shift);               // clear the mode bits
+                    dr7 |= (c.new_mode << mode_shift);          // set the mode bits to the enum value
+                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
+                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->mode = c.new_mode;
                 }
                 else if constexpr (std::is_same_v<T, ChangeBreakpointRangeCommand>)
                 {
+                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]), 0);
+                    const unsigned int len_shift = 18u + c.index * 4;
+                    dr7 &= ~(0b11 << len_shift);                // clear the len bits
+                    dr7 |= (c.new_range << len_shift);   // set the len bits to the enum value
+                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
 
+                    if (breakpoints[c.index].has_value()) breakpoints[c.index]->range = c.new_range;
                 }
             });
+            ptrace(PTRACE_CONT, tid, 0, 0);
         }
         commands.pop();
     }

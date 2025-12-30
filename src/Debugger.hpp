@@ -99,7 +99,7 @@ private:
     // TODO: This is specific to x86-64 intel cpus, unknown if it works for others
     // Each index corresponds to a debug register: dr0, dr1, dr2, dr3
     std::array<std::optional<Breakpoint>, 4> breakpoints;
-    std::array<std::function<void()>, 4> callbacks;
+    std::array<std::optional<std::function<void(user_regs_struct)>>, 4> callbacks;
 
     std::thread debug_thread;
     std::atomic_bool debug_thread_running;
