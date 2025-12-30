@@ -6,10 +6,10 @@
 
 #include "Process.hpp"
 #include "events/CloseWindowEvent.hpp"
-#include "events/OpenDebugWindowEvent.hpp"
+#include "events/OpenBPWatcherWindowEvent.hpp"
 #include "events/SetProcessEvent.hpp"
 
-using AppEvent = std::variant<OpenDebugWindowEvent, SetProcessEvent, CloseWindowEvent>;
+using AppEvent = std::variant<OpenBPWatcherWindowEvent, SetProcessEvent, CloseWindowEvent>;
 
 struct AppState
 {

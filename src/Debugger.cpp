@@ -1,16 +1,23 @@
 #include "Debugger.hpp"
 
+#include <cassert>
 #include <filesystem>
 #include <mutex>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <print>
 
-void handler(int) {};
+void handler(int)
+{
+}
 
-Debugger::Debugger(pid_t pid) : pid(pid), debug_thread(std::thread{&Debugger::debug_thread_fn, this}), debug_thread_running(true)
+Debugger::Debugger(pid_t pid) : pid(pid), debug_thread_running(true), debug_init_ready(false)
 {
 
+    debug_thread = std::thread{&Debugger::debug_thread_fn, this};
+    std::unique_lock lock{debug_mutex};
+    debug_init.wait(lock, [this] { return debug_init_ready; });
+    // Wait until signal handler is added until returning from constructor
 }
 
 Debugger::~Debugger()
@@ -22,38 +29,58 @@ Debugger::~Debugger()
     std::println("Thread joined");
 }
 
-void Debugger::add_breakpoint(uintptr_t addr, BreakpointMode mode, BreakpointRange range)
+std::optional<Debugger::Breakpoint> Debugger::get_breakpoint(size_t index)
 {
     std::unique_lock lock{debug_mutex};
-    this->commands.emplace(BreakpointCommand{Breakpoint{addr, mode, range, true}});
-    lock.unlock();
+    return breakpoints.at(index);
+}
 
+bool Debugger::process_valid() const
+{
+    return pid != -1;
+}
+
+void Debugger::send_command(DebugCommand&& command)
+{
+    command.visit([](auto x)
+    {
+        assert(x.index <= 3 && "Must be valid breakpoint index 0-3");
+    });
+    std::unique_lock lock{debug_mutex};
+    commands.emplace(std::move(command));
+    lock.unlock();
     // Wake the debug thread up if it is blocked on the waitpid call
     pthread_kill(debug_thread.native_handle(), SIGUSR1);
 }
 
 void Debugger::debug_thread_fn()
 {
-    for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task", this->pid.load())})
     {
-        // Store thread ids for later
-        pid_t tid = std::stoi(dir.path().filename());
-        this->tids.emplace(tid);
-
-        // Seize all the threads
-        if (ptrace(PTRACE_SEIZE, tid, 0, PTRACE_O_TRACECLONE) == -1)
+        std::lock_guard lock{debug_mutex};
+        for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task", this->pid.load())})
         {
-            perror("SEIZING ERROR");
+            // Store thread ids for later
+            pid_t tid = std::stoi(dir.path().filename());
+            this->tids.emplace(tid);
+
+            // Seize all the threads
+            if (ptrace(PTRACE_SEIZE, tid, 0, PTRACE_O_TRACECLONE) == -1)
+            {
+                perror("SEIZING ERROR");
+            }
         }
+        std::println("Seized!\n");
+
+
+        struct sigaction action{};
+        action.sa_handler = &handler;
+        sigemptyset(&action.sa_mask); // unblock all signals
+        action.sa_flags = SA_INTERRUPT; // interrupt syscalls instead of restarting them
+        sigaction(SIGUSR1, &action, nullptr);
+
+        debug_init_ready = true;
     }
-    std::println("Seized!\n");
-
-
-    struct sigaction action{};
-    action.sa_handler = &handler;
-    sigemptyset(&action.sa_mask); // unblock all signals
-    action.sa_flags = SA_INTERRUPT; // interrupt syscalls instead of restarting them
-    sigaction(SIGUSR1, &action, nullptr);
+    debug_init.notify_one();
 
     while (debug_thread_running)
     {
@@ -63,24 +90,64 @@ void Debugger::debug_thread_fn()
     }
 }
 
-bool Debugger::process_valid() const
-{
-    return pid != -1;
-}
-
 void Debugger::handle_commands()
 {
     std::unique_lock lock{debug_mutex};
     while (!commands.empty())
     {
         auto& command = commands.front();
-        command.visit([]<typename T>(T& t)
+        for (pid_t tid : tids)
         {
-            if constexpr (std::is_same_v<T, BreakpointCommand>)
+            command.visit([tid]<typename T>(const T& c)
             {
+                if constexpr (std::is_same_v<T, SetBreakpointCommand>)
+                {
+                    // set dr(c.index) to c.addr
+                    // c.breakpoint.addr
+                    ptrace(PTRACE_INTERRUPT, tid, 0, 0);
+                    int status;
+                    waitpid(tid, &status, 0);
+                    assert(WSTOPSIG(status) == SIGTRAP); // temporary
+                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]));
 
-            }
-        });
+                    const auto enabled_shift = 1u << c.index * 2;
+                    if (c.breakpoint.enabled) dr7 |= enabled_shift;    // set the local enable bit
+                    else dr7 &= ~enabled_shift;                        // clear the local enable bit
+
+                    const unsigned int mode_shift = 16u + c.index * 4;
+                    dr7 &= ~(0b11 << mode_shift);               // clear the mode bits
+                    dr7 |= (c.breakpoint.mode << mode_shift);   // set the mode bits to the enum value
+
+                    const unsigned int len_shift = 18u + c.index * 4;
+                    dr7 &= ~(0b11 << len_shift);                // clear the len bits
+                    dr7 |= (c.breakpoint.range << len_shift);   // set the len bits to the enum value
+
+                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
+                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[c.index]), c.breakpoint.addr);
+                    ptrace(PTRACE_CONT, tid, 0, 0);
+                }
+                else if constexpr (std::is_same_v<T, RemoveBreakpointCommand>)
+                {
+
+                }
+                else if constexpr (std::is_same_v<T, DisableBreakpointCommand>)
+                {
+
+                }
+                else if constexpr (std::is_same_v<T, EnableBreakpointCommand>)
+                {
+
+                }
+                else if constexpr (std::is_same_v<T, ChangeBreakpointModeCommand>)
+                {
+
+                }
+                else if constexpr (std::is_same_v<T, ChangeBreakpointRangeCommand>)
+                {
+
+                }
+            });
+        }
         commands.pop();
     }
 }
@@ -91,8 +158,15 @@ bool Debugger::handle_events()
     pid_t pid = waitpid(-1, &status, __WALL);
     if (pid == -1)
     {
-        std::println("Waitpid error");
-        return false;
+        if (errno == EINTR)
+        {
+            return false;
+        }
+        else
+        {
+            perror("Waitpid");
+            return true;
+        }
     }
     if (WIFSIGNALED(status) || WIFEXITED(status))
     {
@@ -116,6 +190,15 @@ bool Debugger::handle_events()
             if (ptrace(PTRACE_CONT, child_tid, 0, 0) == -1) perror("PTRACE_CONT Error");
             if (ptrace(PTRACE_CONT, pid, 0, 0) == -1) perror("PTRACE_CONT Error");
             std::println("New Thread created: {}", child_tid);
+        }
+        else if (WSTOPSIG(status) == SIGTRAP)
+        {
+            if (ptrace(PTRACE_POKEUSER, pid, offsetof(user, u_debugreg[6]), 0) == -1) perror("Pokeuser");
+
+            user_regs_struct regs;
+            long stat = ptrace(PTRACE_GETREGS, pid, 0, &regs);
+            std::println("Breakpoint hit! RIP: 0x{:x} RDX: 0x{:x} RCX: 0x{:x} RBX: 0x{:x} RAX: 0x{:x} RSI: 0x{:x} RSP: 0x{:x}", regs.rip, regs.rdx, regs.rcx, regs.rbx, regs.rax, regs.rsi, regs.rsp);
+            if (ptrace(PTRACE_CONT, pid, 0, 0) == -1) perror("PTRACE_CONT Error");
         }
         else
         {

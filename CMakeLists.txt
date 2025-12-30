@@ -18,10 +18,10 @@ add_executable(${CMAKE_PROJECT_NAME}
         src/windows/ScanWindow.cpp
         src/windows/ScanWindow.hpp
         src/AppState.hpp
-        src/events/OpenDebugWindowEvent.hpp
-        src/events/SetProcess.hpp
-        src/windows/DebugWindow.cpp
-        src/windows/DebugWindow.hpp
+        src/events/OpenBPWatcherWindowEvent.hpp
+        src/events/SetProcessEvent.hpp
+        src/windows/BreakpointWatcherWindow.cpp
+        src/windows/BreakpointWatcherWindow.hpp
         src/events/CloseWindowEvent.hpp
         #        src/test1.cpp
 )

@@ -645,7 +645,19 @@ void ScanWindow::draw_addr_table()
             {
                 if (ImGui::MenuItem("Find out what accesses this address"))
                 {
-                    state.send_event(OpenDebugWindowEvent{});
+                    Debugger::BreakpointRange range = Debugger::QWORD; // Assume qword if the type is not one of the 4 options. Also used for strings
+                    entry.value.visit([&range](const auto& val)
+                    {
+                       if constexpr (sizeof(val) == sizeof(uint8_t)) range = Debugger::BYTE;
+                       else if constexpr (sizeof(val) == sizeof(uint16_t)) range = Debugger::WORD;
+                       else if constexpr (sizeof(val) == sizeof(uint32_t)) range = Debugger::DWORD;
+                       else if constexpr (sizeof(val) == sizeof(uint64_t)) range = Debugger::QWORD;
+                    });
+                    state.send_event(
+                        OpenBPWatcherWindowEvent{
+                                Debugger::Breakpoint{entry.addr, Debugger::READWRITE, range, true}
+                            }
+                        );
                 }
                 if (ImGui::MenuItem("Find out what writes to this address"))
                 {

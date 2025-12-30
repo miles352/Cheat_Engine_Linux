@@ -15,7 +15,7 @@
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_sdl3.h"
-#include "windows/DebugWindow.hpp"
+#include "windows/BreakpointWatcherWindow.hpp"
 #include "windows/ScanWindow.hpp"
 #include "windows/Window.hpp"
 
@@ -160,9 +160,9 @@ void Application::handle_events()
     while (!state.events.empty());
 }
 
-void Application::handle_event(OpenDebugWindowEvent data)
+void Application::handle_event(OpenBPWatcherWindowEvent data)
 {
-    windows[Window::DEBUG] = std::make_unique<DebugWindow>(state);
+    windows[Window::DEBUG] = std::make_unique<BreakpointWatcherWindow>(state, data.breakpoint);
 }
 
 void Application::handle_event(SetProcessEvent data)
