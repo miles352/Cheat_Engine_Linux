@@ -218,7 +218,9 @@ bool Debugger::handle_events()
         std::println("process ended");
         if (pid == this->pid) // if the main pid is signaled
         {
-            // TODO: Stop debugging
+            // This will cause process_valid to return false when called.
+            // Returning true from this function causes the debug thread to end
+            this->tids.clear(); // clear the tids so the thread cleanup doesnt try to detach and clear breakpoints from a killed thread
             pid = -1;
             return true;
         }
@@ -250,7 +252,8 @@ bool Debugger::handle_events()
                     breakpoints[i]->second(regs, pid); // call the callback function
                 }
             }
-            if (ptrace(PTRACE_POKEUSER, pid, offsetof(user, u_debugreg[6]), 0) == -1) perror("Pokeuser"); // clear dr6
+            // clear dr6 and set bit 16, following what the intel manual recommends debug handlers do
+            if (ptrace(PTRACE_POKEUSER, pid, offsetof(user, u_debugreg[6]), 1u << 16) == -1) perror("Pokeuser");
 
             if (ptrace(PTRACE_CONT, pid, 0, 0) == -1) perror("PTRACE_CONT Error");
         }

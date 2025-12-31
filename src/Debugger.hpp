@@ -12,6 +12,9 @@
 #include <vector>
 #include <sys/user.h>
 
+/** General purpose debugger.
+ * If the attached process is killed then Debugger::process_valid() will return false. The user is responsible for checking this.
+ */
 class Debugger
 {
 public:

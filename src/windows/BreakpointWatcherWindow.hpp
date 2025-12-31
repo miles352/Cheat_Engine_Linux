@@ -25,6 +25,8 @@ class BreakpointWatcherWindow : public Window
         int count;
     };
 
+    /** The breakpoint handler function gets ran on the debug thread so we need a mutex. */
+    std::mutex handler_mutex;
     /** Map of address that triggered breakpoint to breakpoint struct */
     std::unordered_map<uintptr_t, BreakpointHit> breakpoint_hits;
 
