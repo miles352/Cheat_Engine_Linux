@@ -15,6 +15,8 @@
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
 #include "imgui_impl_sdl3.h"
+// #include "imgui_internal.h"
+#include "imgui_internal.h"
 #include "windows/BreakpointWatcherWindow.hpp"
 #include "windows/ScanWindow.hpp"
 #include "windows/Window.hpp"
@@ -120,6 +122,49 @@ void Application::draw_frame()
     ImGui::ShowDemoWindow(&b_true);
 
     ImGuiIO& io = ImGui::GetIO();
+
+    ImGui::SetNextWindowSize(ImVec2(1000, 1200), ImGuiCond_FirstUseEver);
+    ImGui::Begin("Cheat_Engine_Linux", nullptr);
+
+
+    ImGuiID dockspace_id = ImGui::GetID("Cheat_Engine_Linux");
+
+    ImGui::DockSpace(dockspace_id);
+    ImGui::End();
+
+    static bool setup = true;
+    if (setup)
+    {
+        setup = false;
+        if (const char* path = ImGui::GetIO().IniFilename)
+        {
+            if (!std::filesystem::exists(path)) // If there is no saved data
+            {
+                ImGui::DockBuilderRemoveNode(dockspace_id);
+                ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+                ImVec2 size = ImGui::GetMainViewport()->Size;
+                ImGui::DockBuilderSetNodeSize(dockspace_id, size);
+
+                ImGuiID dock_main_id = dockspace_id;
+                ImGuiID dock_top = // set dock_top to the top portion, dock_main_id becomes the rest of the space
+                    ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Up, 0.05f, nullptr, &dock_main_id);
+
+                ImGuiID dock_bottom = // set dock_bottom to the bottom portion, again dock_main_id becomes the rest of the space
+                    ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Down, 0.25f, nullptr, &dock_main_id);
+
+                ImGuiID dock_left =
+                    ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.45f, nullptr, &dock_main_id);
+
+                ImGui::DockBuilderDockWindow("Process Information", dock_top);
+                ImGui::DockBuilderDockWindow("Scan Results", dock_bottom);
+                ImGui::DockBuilderDockWindow("Address Table", dock_left);
+                ImGui::DockBuilderDockWindow("Scanner", dock_main_id);
+                ImGui::DockBuilderFinish(dockspace_id);
+            }
+        }
+    }
+
+
 
     this->handle_events();
 
