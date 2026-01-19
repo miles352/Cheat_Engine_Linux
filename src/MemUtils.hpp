@@ -43,6 +43,22 @@ namespace MemUtils
         return val;
     }
 
+    /** Reads length bytes of memory at addr addr */
+    inline std::vector<uint8_t> read_addrs(pid_t pid, uintptr_t addr, size_t length)
+    {
+        std::vector<uint8_t> bytes(length);
+        iovec from{reinterpret_cast<void*>(addr), length};
+        iovec to{bytes.data(), length};
+
+        ssize_t status = process_vm_readv(pid, &to, 1, &from, 1, 0);
+        if (status < 0)
+        {
+            perror("read_addrs Error");
+            return {};
+        }
+        return bytes;
+    }
+
     template <typename T>
     requires std::is_trivially_copyable_v<T>
     void write_addr(pid_t pid, uintptr_t addr, T value)
@@ -95,6 +111,8 @@ namespace MemUtils
         return std::pair{std::move(addrs), std::move(values)};
     }
 
+    /** Returns a vector of vectors where each vector in the outer vectors has the same pathname.
+     * I can't remember why I didn't use a map instead, but I had some reason */
     inline std::vector<std::vector<AddressMapping>> get_mappings(pid_t pid, bool include_libs)
     {
         auto tp = std::chrono::system_clock::now();
@@ -138,6 +156,8 @@ namespace MemUtils
             auto it = std::ranges::find_if_not(mapping.pathname, [](char c) { return std::isspace(c); });
             mapping.pathname.erase(mapping.pathname.begin(), it);
 
+
+            // if (mapping.permissions & 0x4) std::println("Mapping length: {} : name {}", mapping.end - mapping.start, mapping.pathname);
 
             if ((mapping.permissions & 0x1) == 0) continue; // dont include mappings that are unreadable
 

@@ -221,7 +221,7 @@ bool Debugger::handle_events()
             // This will cause process_valid to return false when called.
             // Returning true from this function causes the debug thread to end
             this->tids.clear(); // clear the tids so the thread cleanup doesnt try to detach and clear breakpoints from a killed thread
-            pid = -1;
+            this->pid = -1;
             return true;
         }
         this->tids.erase(pid);

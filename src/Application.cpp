@@ -148,12 +148,11 @@ void Application::handle_events()
     if (state.events.empty()) return;
     do
     {
-        AppEvent& event = state.events.front();
-        event.visit([this](auto event_data)
+        AppEvent event = std::move(state.events.front());
+        event.visit([this](auto&& event_data)
         {
             this->handle_event(std::move(event_data));
         });
-
 
         state.events.pop();
     }

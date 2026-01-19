@@ -696,7 +696,8 @@ void ScanWindow::draw_addr_table()
 
             ImGui::TableNextColumn();
 
-            ImGui::Text("0x%lx", entry.addr);
+            ImGui::InputScalar("##address_input", ImGuiDataType_U64, &entry.addr, nullptr, nullptr, "%llx");
+
             ImGui::TableNextColumn();
 
 

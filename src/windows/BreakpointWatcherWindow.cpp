@@ -1,5 +1,7 @@
 #include "BreakpointWatcherWindow.hpp"
 
+#include <iostream>
+
 #include "Debugger.hpp"
 #include "imgui.h"
 #include "MemUtils.hpp"
@@ -14,7 +16,10 @@ void BreakpointWatcherWindow::draw()
 {
     ImGui::Begin("Debug Window", &open);
 
-    if (!open) state.send_event(CloseWindowEvent{WindowID::DEBUG});
+    if (!open || !debugger.process_valid()) state.send_event(CloseWindowEvent{WindowID::DEBUG});
+
+
+    // thread creation breakpoint adds
 
     if (ImGui::BeginTable("breakpoint_table", 3))
     {
@@ -42,7 +47,7 @@ void BreakpointWatcherWindow::draw()
             ImGui::Text("0x%lx", addr);
 
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(breakpoint.asm_preview.c_str());
+            ImGui::TextUnformatted(breakpoint.prev_insn.has_value() ? breakpoint.prev_insn->second.c_str() : "Loading...");
 
             ImGui::PopID();
         }
@@ -54,9 +59,48 @@ void BreakpointWatcherWindow::draw()
     ImGui::End();
 }
 
+std::pair<uintptr_t, std::string> get_previous_insn(pid_t pid, uintptr_t rip)
+{
+    std::vector<std::vector<MemUtils::AddressMapping>> mappings = MemUtils::get_mappings(pid, false);
+    // find mapping that contains rip and is executable
+    for (const auto& mapping : mappings)
+    {
+        for (const auto& map : mapping)
+        {
+            if (map.start <= rip && map.end > rip && (map.permissions & 0x4))
+            {
+                // Read the memory of the mapping
+                std::vector<uint8_t> memory = MemUtils::read_addrs(pid, map.start, map.end - map.start);
+                // dissassemble the mapping
+                csh handle;
+                cs_open(CS_ARCH_X86, CS_MODE_64, &handle);
+                cs_insn* insn;
+                size_t count = cs_disasm(handle, memory.data(), memory.size(), map.start, 0, &insn);
+
+                for (size_t i = 0; i < count; i++)
+                {
+                    if (insn[i].address >= rip)
+                    {
+                        std::string disasm = std::format("{} {}", insn[i-1].mnemonic, insn[i-1].op_str);
+                        std::pair<uintptr_t, std::string> prev_insn{insn[i-1].address, std::move(disasm)};
+                        cs_free(insn, count);
+                        cs_close(&handle);
+                        return prev_insn;
+                    }
+                }
+            }
+        }
+    }
+    throw std::runtime_error("This shouldn't happen");
+}
+
+// #define TIME_START auto tp = std::chrono::system_clock::now();
+// #define TIME_END(msg) std::cout << msg << " took " << std::chrono::duration_cast<std::chrono::milliseconds>((std::chrono::system_clock::now() - tp)).count() << "ms" << std::endl;
+
 void BreakpointWatcherWindow::handle_breakpoint(user_regs_struct regs, pid_t tid)
 {
-    std::lock_guard lock{handler_mutex};
+    std::unique_lock lock{handler_mutex};
+
     auto it = breakpoint_hits.find(regs.rip);
     if (it != breakpoint_hits.end())
     {
@@ -65,52 +109,13 @@ void BreakpointWatcherWindow::handle_breakpoint(user_regs_struct regs, pid_t tid
     }
     else
     {
-        // RIP contains the instruction after the one that triggered the breakpoint
-        // to get the actual instruction, we check backwards from 1 to 15 bytes, until a valid instruction is decoded
-        // only instructions that end at RIP and are equal to the amount left, checking from right to left (meaning no partial instruction thats smaller)
-        // if multiple results are left then the instruction that is longest is chosen
-        // TODO: This can obviously fail, it would be better to scan forwards instead of backwards and save possibly the sizes of each instruction
-
-        csh handle;
-        cs_open(CS_ARCH_X86, CS_MODE_64, &handle);
-        // X86 instructions can be up to 15 bytes
-        uint8_t bytes[15];
-        cs_insn* best_match{};
-        for (int i = 1; i < 16; i++)
+        breakpoint_hits.emplace(regs.rip, BreakpointHit{std::nullopt, regs, 1});
+        lock.unlock();
+        prev_insn_threads.emplace_back([this, tid, regs]()
         {
-            bytes[15 - i] = MemUtils::read_addr<uint8_t>(tid, regs.rip - i);
-
-            cs_insn* insn;
-            size_t ret = cs_disasm(handle, bytes + (15 - i), i, regs.rip - i, 1, &insn);
-            if (ret == 1 && insn->size == i)
-            {
-                if (!best_match || insn->size > best_match->size)
-                {
-                    if (best_match) cs_free(best_match, 1);
-                    best_match = insn;
-                }
-            }
-            else if (ret > 0)
-            {
-                cs_free(insn, ret);
-            }
-        }
-
-        std::string instruction_str = "Failed to Decode";
-        if (best_match)
-        {
-            instruction_str = best_match->mnemonic;
-            instruction_str += " ";
-            instruction_str += best_match->op_str;
-            cs_free(best_match, 1);
-        }
-
-        breakpoint_hits.emplace(regs.rip, BreakpointHit{std::move(instruction_str), regs, 1});
-
-        cs_close(&handle);
+            auto prev_insn = get_previous_insn(tid, regs.rip);
+            std::lock_guard lock{handler_mutex};
+            breakpoint_hits[regs.rip].prev_insn = prev_insn;
+        });
     }
 }
-
-// on breakpoint want:
-// - read registers, instruction pointer, etc
-// - read memory nearby

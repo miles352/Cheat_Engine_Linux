@@ -1,0 +1,5 @@
+- memory browser
+- popup to manually add address to table
+
+
+- lots of things could be cached to increase performance for subsequent accesses, for example when reading the memory to find the previous instruction in BreakpointWatcherWindow
