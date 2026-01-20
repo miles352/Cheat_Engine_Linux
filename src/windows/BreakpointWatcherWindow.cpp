@@ -1,7 +1,5 @@
 #include "BreakpointWatcherWindow.hpp"
 
-#include <iostream>
-
 #include "Debugger.hpp"
 #include "imgui.h"
 #include "MemUtils.hpp"
@@ -9,12 +7,15 @@
 
 BreakpointWatcherWindow::BreakpointWatcherWindow(AppState& state, const Debugger::Breakpoint& breakpoint): state(state), debugger(Debugger{state.process->pid})
 {
+    assert(breakpoint.mode == Debugger::READWRITE || breakpoint.mode == Debugger::WRITE_ONLY && "Breakpoint watcher does not support IO or execution breakpoints");
+    watched_breakpoint = breakpoint;
+    window_id = std::format("Find out what {} this address##debug_window", breakpoint.mode == Debugger::BreakpointMode::READWRITE ? "accesses" : "writes to");
     debugger.send_command(Debugger::SetBreakpointCommand{breakpoint, [this](const user_regs_struct& regs, pid_t tid) { handle_breakpoint(regs, tid); }});
 }
 
 void BreakpointWatcherWindow::draw()
 {
-    ImGui::Begin("Debug Window", &open);
+    ImGui::Begin(window_id.c_str(), &open);
 
     if (!open || !debugger.process_valid()) state.send_event(CloseWindowEvent{WindowID::DEBUG});
 

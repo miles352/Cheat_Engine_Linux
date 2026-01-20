@@ -156,8 +156,8 @@ void Application::draw_frame()
                     ImGui::DockBuilderSplitNode(dock_main_id, ImGuiDir_Left, 0.45f, nullptr, &dock_main_id);
 
                 ImGui::DockBuilderDockWindow("Process Information", dock_top);
-                ImGui::DockBuilderDockWindow("Scan Results", dock_bottom);
-                ImGui::DockBuilderDockWindow("Address Table", dock_left);
+                ImGui::DockBuilderDockWindow("Address Table", dock_bottom);
+                ImGui::DockBuilderDockWindow("Scan Results", dock_left);
                 ImGui::DockBuilderDockWindow("Scanner", dock_main_id);
                 ImGui::DockBuilderFinish(dockspace_id);
             }
@@ -206,6 +206,7 @@ void Application::handle_events()
 
 void Application::handle_event(OpenBPWatcherWindowEvent data)
 {
+    windows[Window::DEBUG] = nullptr; // cause deconstructor to be called first
     windows[Window::DEBUG] = std::make_unique<BreakpointWatcherWindow>(state, data.breakpoint);
 }
 

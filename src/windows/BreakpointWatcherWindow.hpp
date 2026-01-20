@@ -14,6 +14,9 @@ class BreakpointWatcherWindow : public Window
     void draw() override;
     void handle_breakpoint(user_regs_struct regs, pid_t tid);
 
+    Debugger::Breakpoint watched_breakpoint;
+    std::string window_id;
+
     struct BreakpointHit
     {
         /** The instruction address that comes before regs.rip
