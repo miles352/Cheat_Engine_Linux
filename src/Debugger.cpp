@@ -233,7 +233,16 @@ bool Debugger::handle_events()
         {
             pid_t child_tid; // pid returned by waitpid is the parents pid
             if (ptrace(PTRACE_GETEVENTMSG, pid, 0, &child_tid) == -1) perror("PTRACE_GETEVENTMSG Error");
-            // TODO: Add breakpoints
+            tids.emplace(child_tid);
+            for (const auto& breakpoint : breakpoints)
+            {
+                if (!breakpoint.has_value()) continue;
+                /** Re-add the current breakpoints, now that the new tid has been added to the list
+                 * Note: This may not be ideal because it is not "instant" as it will have to finish this handler function
+                 * and go back to the loop to handle the commmands again
+                 */
+                this->send_command(SetBreakpointCommand{breakpoint->first, breakpoint->second});
+            }
             if (ptrace(PTRACE_CONT, child_tid, 0, 0) == -1) perror("PTRACE_CONT Error");
             if (ptrace(PTRACE_CONT, pid, 0, 0) == -1) perror("PTRACE_CONT Error");
             std::println("New Thread created: {}", child_tid);
