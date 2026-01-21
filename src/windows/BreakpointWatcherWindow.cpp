@@ -1,5 +1,7 @@
 #include "BreakpointWatcherWindow.hpp"
 
+#include <iostream>
+
 #include "Debugger.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -84,6 +86,59 @@ void BreakpointWatcherWindow::draw()
                     }
                 }
             }
+            else
+            {
+                ImGui::TextUnformatted("Loading dissassembly...");
+            }
+
+            const user_regs_struct& regs = breakpoint_hits[*selected_hit].regs;
+            ImGui::Text("Registers (Values after highlighted instruction was executed):\n"
+                            "RDI %llx\n"
+                            "RSI %llx\n"
+                            "RDX %llx\n"
+                            "RCX %llx\n"
+                            "RAX %llx\n"
+                            "RIP %llx\n"
+                            "RBX %llx\n"
+                            "RBP %llx\n"
+                            "RSP %llx\n"
+                            "R8 %llx\n"
+                            "R9 %llx\n"
+                            "R10 %llx\n"
+                            "R11 %llx\n"
+                            "R12 %llx\n"
+                            "R13 %llx\n"
+                            "R14 %llx\n"
+                            "R15 %llx\n"
+                            "CS %llx\n"
+                            "SS %llx\n"
+                            "DS %llx\n"
+                            "ES %llx\n"
+                            "FS %llx\n"
+                            "GS %llx",
+                            regs.rdi,
+                            regs.rsi,
+                            regs.rdx,
+                            regs.rcx,
+                            regs.rax,
+                            regs.rip,
+                            regs.rbx,
+                            regs.rbp,
+                            regs.rsp,
+                            regs.r8,
+                            regs.r9,
+                            regs.r10,
+                            regs.r11,
+                            regs.r12,
+                            regs.r13,
+                            regs.r14,
+                            regs.r15,
+                            regs.cs,
+                            regs.ss,
+                            regs.ds,
+                            regs.es,
+                            regs.fs,
+                            regs.gs);
         }
         ImGui::EndChild();
 
@@ -146,7 +201,7 @@ void BreakpointWatcherWindow::get_disasm_preview(pid_t pid, uintptr_t rip)
             }
         }
     }
-    throw std::runtime_error("This shouldn't happen");
+    std::cerr << "Failed to find mapping that contains RIP" << std::endl;
 }
 
 // #define TIME_START auto tp = std::chrono::system_clock::now();
