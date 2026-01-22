@@ -23,8 +23,7 @@ void BreakpointWatcherWindow::draw()
 
     if (!open || !debugger.process_valid()) state.send_event(CloseWindowEvent{WindowID::DEBUG});
 
-
-    // thread creation breakpoint adds
+    std::lock_guard lock{handler_mutex};
 
     // A child wrapper so it can be resizable
     if (ImGui::BeginChild("breakpoint_table_wrapper", ImVec2{0, 0}, ImGuiChildFlags_ResizeY))
@@ -37,7 +36,6 @@ void BreakpointWatcherWindow::draw()
             ImGui::TableSetupColumn("Instruction");
             ImGui::TableHeadersRow();
 
-            std::lock_guard lock{handler_mutex};
             for (const auto& [addr, breakpoint] : breakpoint_hits)
             {
                 ImGui::PushID(static_cast<int>(addr));
@@ -45,16 +43,31 @@ void BreakpointWatcherWindow::draw()
 
                 ImGui::TableNextColumn();
                 bool selected = selected_hit.has_value() && *selected_hit == addr;
-                if (ImGui::Selectable(std::format("{}", breakpoint.count).c_str(), selected, ImGuiSelectableFlags_SpanAllColumns))
+                if (ImGui::Selectable("", selected, ImGuiSelectableFlags_SpanAllColumns)) // This label needs to be blank because if it changes frequently imgui click detection does not work
                 {
                     selected_hit = addr;
                 }
 
-                ImGui::TableNextColumn();
-                ImGui::Text("0x%lx", addr);
+                ImGui::SameLine();
+                ImGui::Text("%d", breakpoint.count);
 
-                ImGui::TableNextColumn();
-                ImGui::TextUnformatted(breakpoint.disasm_preview.has_value() ? breakpoint.disasm_preview->second.at(breakpoint.disasm_preview->first).c_str() : "Loading...");
+                if (breakpoint.disasm_preview.has_value())
+                {
+                    ImGui::TableNextColumn();
+                    ImGui::Text("0x%lx", breakpoint.disasm_preview->first);
+
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(breakpoint.disasm_preview->second.at(breakpoint.disasm_preview->first).c_str());
+                }
+                else
+                {
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted("Loading...");
+
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted("Loading...");
+                }
+
 
                 ImGui::PopID();
             }
@@ -85,37 +98,42 @@ void BreakpointWatcherWindow::draw()
                         ImGui::Text("0x%lx %s", addr, insn.c_str());
                     }
                 }
+                ImGui::Separator();
             }
             else
             {
                 ImGui::TextUnformatted("Loading dissassembly...");
             }
 
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {0, 0}); // make align with text height
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, {0.f, 0.f, 0.f, 0.f}); // remove text input box
+
             const user_regs_struct& regs = breakpoint_hits[*selected_hit].regs;
-            ImGui::Text("Registers (Values after highlighted instruction was executed):\n"
-                            "RDI %llx\n"
-                            "RSI %llx\n"
-                            "RDX %llx\n"
-                            "RCX %llx\n"
-                            "RAX %llx\n"
-                            "RIP %llx\n"
-                            "RBX %llx\n"
-                            "RBP %llx\n"
-                            "RSP %llx\n"
-                            "R8 %llx\n"
-                            "R9 %llx\n"
-                            "R10 %llx\n"
-                            "R11 %llx\n"
-                            "R12 %llx\n"
-                            "R13 %llx\n"
-                            "R14 %llx\n"
-                            "R15 %llx\n"
-                            "CS %llx\n"
-                            "SS %llx\n"
-                            "DS %llx\n"
-                            "ES %llx\n"
-                            "FS %llx\n"
-                            "GS %llx",
+            // TODO: Add xmm registers
+            std::string register_display = std::format("Registers (Values after highlighted instruction was executed):\n"
+                            "RDI 0x{:x}\n"
+                            "RSI 0x{:x}\n"
+                            "RDX 0x{:x}\n"
+                            "RCX 0x{:x}\n"
+                            "RAX 0x{:x}\n"
+                            "RIP 0x{:x}\n"
+                            "RBX 0x{:x}\n"
+                            "RBP 0x{:x}\n"
+                            "RSP 0x{:x}\n"
+                            "R8 0x{:x}\n"
+                            "R9 0x{:x}\n"
+                            "R10 0x{:x}\n"
+                            "R11 0x{:x}\n"
+                            "R12 0x{:x}\n"
+                            "R13 0x{:x}\n"
+                            "R14 0x{:x}\n"
+                            "R15 0x{:x}\n"
+                            "CS 0x{:x}\n"
+                            "SS 0x{:x}\n"
+                            "DS 0x{:x}\n"
+                            "ES 0x{:x}\n"
+                            "FS 0x{:x}\n"
+                            "GS 0x{:x}",
                             regs.rdi,
                             regs.rsi,
                             regs.rdx,
@@ -139,12 +157,19 @@ void BreakpointWatcherWindow::draw()
                             regs.es,
                             regs.fs,
                             regs.gs);
+
+            // https://github.com/ocornut/imgui/issues/950#issuecomment-1605762156
+            ImVec2 text_size = ImGui::CalcTextSize(register_display.c_str(), register_display.c_str() + register_display.size());
+            text_size.x = -FLT_MIN; // fill width (suppresses label)
+            text_size.y += ImGui::GetStyle().FramePadding.y; // single pad
+
+            ImGui::InputTextMultiline("##multilineInput", register_display.data(), register_display.size() + 1, text_size, ImGuiInputTextFlags_ReadOnly);
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar();
+
+
         }
         ImGui::EndChild();
-
-        // display more information
-        // - More lines of asm
-        // - Register states
     }
 
 
