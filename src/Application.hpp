@@ -27,6 +27,7 @@ class Application
     void handle_event(OpenBPWatcherWindowEvent data);
     void handle_event(SetProcessEvent data);
     void handle_event(CloseWindowEvent data);
+    void handle_event(OpenMemoryViewerWindowEvent data);
 
 public:
     Application();

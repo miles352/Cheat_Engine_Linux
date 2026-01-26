@@ -23,6 +23,10 @@ add_executable(${CMAKE_PROJECT_NAME}
         src/windows/BreakpointWatcherWindow.cpp
         src/windows/BreakpointWatcherWindow.hpp
         src/events/CloseWindowEvent.hpp
+        src/windows/MemoryViewerWindow.cpp
+        src/windows/MemoryViewerWindow.hpp
+        src/ScanType.hpp
+        src/events/OpenMemoryViewerWindowEvent.hpp
         #        src/test1.cpp
 )
 

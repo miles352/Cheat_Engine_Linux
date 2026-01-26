@@ -7,9 +7,13 @@
 #include "Process.hpp"
 #include "events/CloseWindowEvent.hpp"
 #include "events/OpenBPWatcherWindowEvent.hpp"
+#include "events/OpenMemoryViewerWindowEvent.hpp"
 #include "events/SetProcessEvent.hpp"
 
-using AppEvent = std::variant<OpenBPWatcherWindowEvent, SetProcessEvent, CloseWindowEvent>;
+using AppEvent =   std::variant<OpenBPWatcherWindowEvent,
+                                SetProcessEvent,
+                                CloseWindowEvent,
+                                OpenMemoryViewerWindowEvent>;
 
 struct AppState
 {

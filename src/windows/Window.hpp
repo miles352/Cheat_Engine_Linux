@@ -9,6 +9,7 @@ public:
     {
         SCANNER,
         DEBUG,
+        MEMORY_VIEWER,
         WINDOW_LENGTH
     };
 

@@ -4,7 +4,6 @@
 
 #include "Debugger.hpp"
 #include "imgui.h"
-#include "imgui_internal.h"
 #include "MemUtils.hpp"
 #include "capstone/capstone.h"
 
@@ -18,10 +17,14 @@ BreakpointWatcherWindow::BreakpointWatcherWindow(AppState& state, const Debugger
 
 void BreakpointWatcherWindow::draw()
 {
-    // ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0.0f, 0.0f});
     ImGui::Begin(window_id.c_str(), &open);
 
-    if (!open || !debugger.process_valid()) state.send_event(CloseWindowEvent{WindowID::DEBUG});
+    if (!open || !debugger.process_valid())
+    {
+        state.send_event(CloseWindowEvent{WindowID::DEBUG});
+        ImGui::End();
+        return;
+    }
 
     std::lock_guard lock{handler_mutex};
 
@@ -174,7 +177,6 @@ void BreakpointWatcherWindow::draw()
 
 
     ImGui::End();
-    // ImGui::PopStyleVar();
 }
 
 void BreakpointWatcherWindow::get_disasm_preview(pid_t pid, uintptr_t rip)

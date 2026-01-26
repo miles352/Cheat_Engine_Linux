@@ -18,6 +18,7 @@
 // #include "imgui_internal.h"
 #include "imgui_internal.h"
 #include "windows/BreakpointWatcherWindow.hpp"
+#include "windows/MemoryViewerWindow.hpp"
 #include "windows/ScanWindow.hpp"
 #include "windows/Window.hpp"
 
@@ -71,6 +72,10 @@ Application::Application()
     // Setup Platform/Renderer backends
     ImGui_ImplSDL3_InitForOpenGL(sdl_window, gl_context);
     ImGui_ImplOpenGL3_Init();
+
+
+    // TESTING
+    // windows[Window::MEMORY_VIEWER] = std::make_unique<MemoryViewerWindow>(state, 0x1234);
 }
 
 Application::~Application()
@@ -194,12 +199,11 @@ void Application::handle_events()
     do
     {
         AppEvent event = std::move(state.events.front());
+        state.events.pop();
         event.visit([this](auto&& event_data)
         {
             this->handle_event(std::move(event_data));
         });
-
-        state.events.pop();
     }
     while (!state.events.empty());
 }
@@ -217,11 +221,17 @@ void Application::handle_event(SetProcessEvent data)
         window = nullptr;
     }
     state.process = std::move(data.new_process);
-    windows[0] = std::make_unique<ScanWindow>(state);
+    windows[Window::SCANNER] = std::make_unique<ScanWindow>(state);
 }
 
 void Application::handle_event(CloseWindowEvent data)
 {
     windows[data.id] = nullptr;
+}
+
+void Application::handle_event(OpenMemoryViewerWindowEvent data)
+{
+    windows[Window::MEMORY_VIEWER] = nullptr;
+    windows[Window::MEMORY_VIEWER] = std::make_unique<MemoryViewerWindow>(state, data.top_addr);
 }
 

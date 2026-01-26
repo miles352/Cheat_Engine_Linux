@@ -336,169 +336,6 @@ void ScanWindow::draw()
 
 
     ImGui::Spacing();
-    if (ImGui::Button("Debug"))
-    {
-        // pid_t tid = 10534;
-        // long status;
-        // while (true)
-        // {
-        //     status = ptrace(PTRACE_SEIZE, tid, 0, 0);
-        //     if (status < 0) perror("err");
-        //     else break;
-        // }
-        // int status2;
-
-        // set debug watchpoint at ammo address with length of 4 bytes with read or write level.
-
-        for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task/", state.process->pid)})
-        {
-            pid_t tid = std::stoi(dir.path().filename());
-            long status;
-
-            status = ptrace(PTRACE_SEIZE, tid, 0, 0);
-            if (status < 0) perror("err: ");
-
-            status = ptrace(PTRACE_INTERRUPT, tid, 0, 0);
-            if (status < 0) perror("err: ");
-
-            int changed_state;
-            waitpid(tid, &changed_state, 0);
-            if (!WIFSTOPPED(changed_state)) throw std::runtime_error("State change was not caused by ptrace");
-
-            status = ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[0]), 0x290b4ef4); // set address to breakpoint
-            if (status < 0) perror("err: ");
-
-            long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]));
-
-            dr7 |= 0x1; // set L0, local addr enable
-            dr7 |= (0x1 << 16); // set r/w0 to break on data writes only
-            dr7 |= (0x4 << 18); // set len0 to 4 bytes
-
-
-            status = ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
-
-            status = ptrace(PTRACE_CONT, tid, 0, 0);
-
-
-            // Todo: use waitpid to wait for SIGTRAP
-            // then read shit when it hits, print assembly etc
-        }
-
-        int changed_state;
-
-        int changed_pid = waitpid(-1, &changed_state, 0);
-        if (WIFSTOPPED(changed_state))
-        {
-            int stopcode = WSTOPSIG(changed_state);
-            if (stopcode == SIGTRAP)
-            {
-                printf("Breakpoint triggered\n");
-
-                user_regs_struct regs{};
-
-
-                long status = ptrace(PTRACE_GETREGS, changed_pid, 0, &regs);
-                if (status < 0) perror("err");
-
-                const int asm_bytes {100};
-                std::vector<uint8_t> bytes(asm_bytes);
-                for (int i = 0; i < asm_bytes; i++)
-                {
-                    bytes[i] = MemUtils::read_addr<uint8_t>(state.process->pid, regs.rip + i - 10);
-                }
-
-
-                csh handle;
-                cs_insn *insn;
-
-                if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK)
-                    return;
-                size_t count = cs_disasm(handle, bytes.data(), bytes.size(), regs.rip - 10, 0, &insn);
-                if (count > 0) {
-                    size_t j;
-                    for (j = 0; j < count; j++) {
-                        if (insn[j].address == regs.rip) printf("--->  ");
-                        printf("0x%" PRIx64, insn[j].address);
-
-                        printf(": %s %s\n", insn[j].mnemonic,
-                                insn[j].op_str);
-                    }
-
-                    cs_free(insn, count);
-                } else
-                    printf("ERROR: Failed to disassemble given code!\n");
-
-                cs_close(&handle);
-
-
-                // clear breakpoints
-                for (auto& dir : std::filesystem::directory_iterator{std::format("/proc/{}/task/", state.process->pid)})
-                {
-                    pid_t tid = std::stoi(dir.path().filename());
-
-                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[0]), 0x0);
-                    long dr7 = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[7]));
-                    dr7 &= ~(0x1); // clear L0
-                    ptrace(PTRACE_POKEUSER, tid, offsetof(user, u_debugreg[7]), dr7);
-
-                    ptrace(PTRACE_DETACH, tid, 0, 0);
-                }
-                // resume execution
-            }
-        }
-
-
-    //     status = ptrace(PTRACE_INTERRUPT, tid);
-    //     if (status < 0) perror("err");
-    //
-    //     waitpid(tid, &status2, 0);
-    //
-    //     long data = ptrace(PTRACE_PEEKUSER, tid, offsetof(user, u_debugreg[6]));
-    //     if (data < 0) perror("err");
-    //
-    //     // Note: Should clear DR6 and set DR6:16 after handling interrupt (processor will not clear it)
-    //
-    //     //
-    //     user_regs_struct regs{};
-    //
-    //
-    //     status = ptrace(PTRACE_GETREGS, tid, 0, &regs);
-    //     if (status < 0) perror("err");
-    //
-    //     const int asm_bytes {100};
-    //     std::vector<uint8_t> bytes(asm_bytes*2);
-    //     for (int i = 0; i < asm_bytes; i++)
-    //     {
-    //         bytes[i] = MemUtils::read_addr<uint8_t>(pid, regs.rip + i);
-    //     }
-    //
-    //
-    //     csh handle;
-    //     cs_insn *insn;
-    //
-    //     if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK)
-    //         return;
-    //     size_t count = cs_disasm(handle, bytes.data(), bytes.size(), regs.rip, 0, &insn);
-    //     if (count > 0) {
-    //         size_t j;
-    //         for (j = 0; j < count; j++) {
-    //             printf("0x%" PRIx64, insn[j].address);
-    //
-    //             for (int i = 0; i < insn[j].size; i++)
-    //             {
-    //                 printf("%x ", insn[j].bytes[i]);
-    //             }
-    //
-    //             printf(": %s %s\n", insn[j].mnemonic,
-    //                     insn[j].op_str);
-    //         }
-    //
-    //         cs_free(insn, count);
-    //     } else
-    //         printf("ERROR: Failed to disassemble given code!\n");
-    //
-    //     cs_close(&handle);
-    }
 
     if (!state.process.has_value()) ImGui::EndDisabled();
 
@@ -659,7 +496,7 @@ void ScanWindow::draw_addr_table()
                             }
                         );
                 }
-                if (ImGui::MenuItem("Find out what writes to this address"))
+                else if (ImGui::MenuItem("Find out what writes to this address"))
                 {
                     Debugger::BreakpointRange range = Debugger::QWORD; // Assume qword if the type is not one of the 4 options. Also used for strings
                     entry.value.visit([&range](const auto& val)
@@ -675,9 +512,16 @@ void ScanWindow::draw_addr_table()
                             }
                         );
                 }
+                else if (ImGui::MenuItem("Open memory viewer at this address"))
+                {
+                    state.send_event(OpenMemoryViewerWindowEvent{entry.addr});
+                }
                 ImGui::EndPopup();
             }
-            ImGui::SameLine(); // Needed or the selectable eats a column
+
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+            ImGui::SameLine();// Needed or the selectable eats a column
+            ImGui::PopStyleVar();
 
             ScanType new_val = entry.value.visit([pid = state.process->pid, &entry]<typename T>(const T& val)
             {

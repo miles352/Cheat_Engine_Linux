@@ -12,13 +12,13 @@
 #include "AppState.hpp"
 #include "MemUtils.hpp"
 #include "Process.hpp"
+#include "ScanType.hpp"
 
 
 class ScanWindow : public Window
 {
     void draw() override;
 
-    using ScanType = std::variant<int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
     using ScanResultsValues = std::variant<std::vector<int8_t>, std::vector<int16_t>, std::vector<int32_t>, std::vector<int64_t>, std::vector<float>, std::vector<double>>;
 
     struct AddrTableEntry
