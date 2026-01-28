@@ -179,6 +179,9 @@ void BreakpointWatcherWindow::draw()
     ImGui::End();
 }
 
+#define TIME_START auto tp = std::chrono::system_clock::now();
+#define TIME_END(msg) std::cout << msg << " took " << std::chrono::duration_cast<std::chrono::milliseconds>((std::chrono::system_clock::now() - tp)).count() << "ms" << std::endl;
+
 void BreakpointWatcherWindow::get_disasm_preview(pid_t pid, uintptr_t rip)
 {
     std::vector<std::vector<MemUtils::AddressMapping>> mappings = MemUtils::get_mappings(pid, false);
@@ -189,40 +192,45 @@ void BreakpointWatcherWindow::get_disasm_preview(pid_t pid, uintptr_t rip)
         {
             if (map.start <= rip && map.end > rip && (map.permissions & 0x4))
             {
-                // Read the memory of the mapping
-                std::vector<uint8_t> memory = MemUtils::read_addrs(pid, map.start, map.end - map.start);
-                // dissassemble the mapping
-                csh handle;
-                cs_open(CS_ARCH_X86, CS_MODE_64, &handle);
-                cs_insn* insn;
-                size_t count = cs_disasm(handle, memory.data(), memory.size(), map.start, 0, &insn);
+                const std::vector<uint64_t>& insn_lens = state.process_cache->get_insn_lens(map);
 
-                for (int i = 0; i < count; i++)
+
+                uintptr_t addr = map.start; // the address before rip
+                std::array<uintptr_t, DISASM_PREVIEW_LEN / 2> history{};
+                size_t history_counter{};
+                for (uint64_t packed : insn_lens)
                 {
-                    if (insn[i].address >= rip)
+                    for (int j = 0; j < 16; j++)
                     {
-                        // save the next DISASM_PREVIEW_LEN instructions centered around the instruction that triggered the breakpoint
-                        // i is subtracted by 1 in its uses because i-1 is the instruction that actually triggered it
-                        std::map<uintptr_t, std::string> saved_insns;
-                        std::lock_guard lock{handler_mutex};
-                        for (int j = 0; j < DISASM_PREVIEW_LEN / 2; j++)
+                        uintptr_t next = addr + (packed & 0xF);
+                        packed >>= 4;
+
+                        // save last DISASM_PREVIEW_LEN addresses so we can get a valid starting address to give to capstone
+                        history[history_counter % history.size()] = addr;
+                        history_counter++;
+
+                        if (next == rip)
                         {
-                            int index = i - 1 - j;
-                            if (index < 0) break;
-                            saved_insns.emplace(insn[index].address,
-                                std::format("{} {}", insn[index].mnemonic, insn[index].op_str));
+                            uintptr_t preview_addr = history[(history_counter - history.size()) % history.size()];
+                            std::vector<uint8_t> bytes = MemUtils::read_addrs(pid, preview_addr, DISASM_PREVIEW_LEN * 15); // Read 15 bytes for each instruction just incase they are that big
+
+                            csh csh;
+                            cs_open(CS_ARCH_X86, CS_MODE_64, &csh);
+                            cs_insn* insns;
+                            size_t count = cs_disasm(csh, bytes.data(), bytes.size(), preview_addr, DISASM_PREVIEW_LEN, &insns);
+                            std::map<uintptr_t, std::string> saved_insns;
+                            for (size_t i{}; i < count; i++)
+                            {
+                                saved_insns.emplace(insns[i].address, std::format("{} {}", insns[i].mnemonic, insns[i].op_str));
+                            }
+                            std::lock_guard lock{handler_mutex};
+                            breakpoint_hits[rip].disasm_preview = {addr, std::move(saved_insns)};
+                            cs_free(insns, count);
+                            cs_close(&csh);
+                            return;
                         }
-                        for (int j = 1; j < DISASM_PREVIEW_LEN / 2 + 1; j++)
-                        {
-                            int index = i - 1 + j;
-                            if (index >= count) break;
-                            saved_insns.emplace(insn[index].address,
-                                std::format("{} {}", insn[index].mnemonic, insn[index].op_str));
-                        }
-                        breakpoint_hits[rip].disasm_preview = {insn[i-1].address, std::move(saved_insns)};
-                        cs_free(insn, count);
-                        cs_close(&handle);
-                        return;
+
+                        addr = next;
                     }
                 }
             }
@@ -230,9 +238,6 @@ void BreakpointWatcherWindow::get_disasm_preview(pid_t pid, uintptr_t rip)
     }
     std::cerr << "Failed to find mapping that contains RIP" << std::endl;
 }
-
-// #define TIME_START auto tp = std::chrono::system_clock::now();
-// #define TIME_END(msg) std::cout << msg << " took " << std::chrono::duration_cast<std::chrono::milliseconds>((std::chrono::system_clock::now() - tp)).count() << "ms" << std::endl;
 
 void BreakpointWatcherWindow::handle_breakpoint(user_regs_struct regs, pid_t tid)
 {

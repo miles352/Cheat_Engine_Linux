@@ -27,6 +27,7 @@ add_executable(${CMAKE_PROJECT_NAME}
         src/windows/MemoryViewerWindow.hpp
         src/ScanType.hpp
         src/events/OpenMemoryViewerWindowEvent.hpp
+        src/ProcessCache.hpp
         #        src/test1.cpp
 )
 

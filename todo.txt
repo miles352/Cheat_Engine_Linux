@@ -3,3 +3,5 @@
 
 
 - lots of things could be cached to increase performance for subsequent accesses, for example when reading the memory to find the previous instruction in BreakpointWatcherWindow
+
+- redo AppState so the things inside it are not optional but instead AppState itself is optional / can be null

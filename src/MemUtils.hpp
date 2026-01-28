@@ -17,6 +17,18 @@ namespace MemUtils
     // struct representing lines in /proc/pid/maps
     struct AddressMapping
     {
+        struct Hash
+        {
+            size_t operator()(const AddressMapping& mapping) const
+            {
+                return mapping.start
+                        ^ mapping.end << 1
+                        ^ mapping.permissions << 2
+                        ^ mapping.offset << 3
+                        ^ std::hash<std::string>{}(mapping.pathname);
+            }
+        };
+
         uintptr_t start;
         uintptr_t end;
         uint8_t permissions;
@@ -24,6 +36,8 @@ namespace MemUtils
         // device
         // inode
         std::string pathname;
+
+        bool operator==(const AddressMapping& other) const = default;
     };
 
     template <typename T>

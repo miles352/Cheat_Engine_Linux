@@ -72,10 +72,6 @@ Application::Application()
     // Setup Platform/Renderer backends
     ImGui_ImplSDL3_InitForOpenGL(sdl_window, gl_context);
     ImGui_ImplOpenGL3_Init();
-
-
-    // TESTING
-    // windows[Window::MEMORY_VIEWER] = std::make_unique<MemoryViewerWindow>(state, 0x1234);
 }
 
 Application::~Application()
@@ -220,7 +216,8 @@ void Application::handle_event(SetProcessEvent data)
     {
         window = nullptr;
     }
-    state.process = std::move(data.new_process);
+    // recreate the process state
+    state = AppState{data.new_process, std::make_unique<ProcessCache>(data.new_process.pid)};
     windows[Window::SCANNER] = std::make_unique<ScanWindow>(state);
 }
 
